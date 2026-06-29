@@ -1,0 +1,3 @@
+# SPA fallback: let react-router handle client-side routes on hard refresh / deep links.
+# Netlify serves real files (assets, etc.) first, then rewrites everything else to index.html (200 = rewrite, URL preserved).
+/*    /index.html   200

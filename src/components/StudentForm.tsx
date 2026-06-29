@@ -424,7 +424,7 @@ export function StudentForm({
             >
               {linked ? (
                 <span style={{ fontSize: 12.5, color: Brand.onSurfaceVariant }}>
-                  Linked parent — name &amp; phone are managed by them.
+                  Linked parent — name & phone are managed by them.
                 </span>
               ) : null}
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>

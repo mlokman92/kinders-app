@@ -82,7 +82,7 @@ export function Login() {
           </div>
           <div>
             <div style={{ fontWeight: 800, fontSize: 20, color: Brand.onSurface }}>Kinders</div>
-            <div style={{ fontSize: 13, color: Brand.onSurfaceVariant }}>Director &amp; teacher portal</div>
+            <div style={{ fontSize: 13, color: Brand.onSurfaceVariant }}>Director & teacher portal</div>
           </div>
         </div>
 
@@ -127,7 +127,7 @@ export function Login() {
             {error ? <ErrorLine text={error} /> : null}
             <div style={{ marginTop: 18 }}>
               <Button onClick={handleVerify} disabled={busy} style={{ width: '100%' }}>
-                {busy ? <Spinner size={16} /> : 'Verify &amp; sign in'}
+                {busy ? <Spinner size={16} /> : 'Verify & sign in'}
               </Button>
             </div>
             <button
