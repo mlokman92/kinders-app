@@ -16,16 +16,7 @@ import { getStudentPhotoUrls } from '@/lib/storage';
 import { supabase } from '@/lib/supabase';
 import { Brand, Radius } from '@/lib/theme';
 
-import { Avatar, Button, Field, Modal, Select, Spinner, TextInput } from './ui';
-
-type StudentLite = {
-  id: number;
-  name: string;
-  dob: string | null;
-  center_id: number;
-  profile_picture_url: string | null;
-  classes: { id: number; name: string }[];
-};
+import { Avatar, Button, Field, Modal, Select, Spinner } from './ui';
 
 type PresetStudent = {
   id: number;
@@ -35,36 +26,53 @@ type PresetStudent = {
   photoUrl?: string | null;
 };
 
-const NO_CLASS = 'No classroom';
+type StudentLite = {
+  id: number;
+  name: string;
+  dob: string | null;
+  center_id: number;
+  profile_picture_url: string | null;
+  classroom_ids: number[];
+};
+
+type Classroom = { id: number; name: string; center_id: number };
 
 /**
- * Create a draft `student_assessment`. The student picker is grouped by
- * classroom and shows each child's photo for quick scanning. Section selection
- * adapts to the chosen framework's scoring model: a Permata checklist needs an
- * age band, the KSPK rubric has a single section, and a special-needs screening
- * defaults to all developmental areas (section = null) but can be narrowed.
+ * Create draft assessments. From a child's profile (`presetStudent`) it makes a
+ * single assessment for that child. From the Assessments page it's a class-first
+ * bulk flow: pick a classroom, tick students (or "select all"), choose the
+ * framework, and one draft `student_assessment` is created per selected child.
+ *
+ * Section selection adapts to the framework's scoring model: a Permata checklist
+ * needs an age band, the KSPK rubric has a single section, and a special-needs
+ * screening defaults to all developmental areas (section = null).
  */
 export function NewAssessmentModal({
   presetStudent,
   onClose,
   onCreated,
+  onBulkCreated,
 }: {
   presetStudent?: PresetStudent;
   onClose: () => void;
-  onCreated: (assessmentId: number) => void;
+  onCreated?: (assessmentId: number) => void;
+  onBulkCreated?: (count: number) => void;
 }) {
-  const [students, setStudents] = useState<StudentLite[]>([]);
-  const [photos, setPhotos] = useState<Record<string, string>>({});
+  const bulk = !presetStudent;
+
   const [frameworks, setFrameworks] = useState<Framework[]>([]);
   const [exams, setExams] = useState<Exam[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
+  const [classrooms, setClassrooms] = useState<Classroom[]>([]);
+  const [students, setStudents] = useState<StudentLite[]>([]);
+  const [photos, setPhotos] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
 
-  const [studentId, setStudentId] = useState<string>(presetStudent ? String(presetStudent.id) : '');
-  const [studentSearch, setStudentSearch] = useState('');
-  const [examId, setExamId] = useState<string>('');
-  const [frameworkId, setFrameworkId] = useState<string>('');
-  const [sectionId, setSectionId] = useState<string>(''); // '' = all areas (screening) or unset
+  const [classId, setClassId] = useState('');
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [examId, setExamId] = useState('');
+  const [frameworkId, setFrameworkId] = useState('');
+  const [sectionId, setSectionId] = useState(''); // '' = all areas (screening) or unset
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -73,28 +81,28 @@ export function NewAssessmentModal({
     let active = true;
     (async () => {
       try {
-        const [fw, exs, studsRes] = await Promise.all([
-          listFrameworks(),
-          listExams(),
-          presetStudent
-            ? Promise.resolve(null)
-            : supabase
-                .from('students')
-                .select('id, name, dob, center_id, profile_picture_url, enrollments(classrooms(id, name))')
-                .order('name'),
-        ]);
+        const [fw, exs] = await Promise.all([listFrameworks(), listExams()]);
         if (!active) return;
         setFrameworks(fw);
         setExams(exs);
-        if (studsRes && 'data' in studsRes) {
-          const list = (studsRes.data ?? []).map((s) => {
+        if (bulk) {
+          const [classRes, studRes] = await Promise.all([
+            supabase.from('classrooms').select('id, name, center_id').order('name'),
+            supabase
+              .from('students')
+              .select('id, name, dob, center_id, profile_picture_url, enrollments(classroom_id)')
+              .order('name'),
+          ]);
+          if (!active) return;
+          setClassrooms((classRes.data ?? []) as Classroom[]);
+          const list = (studRes.data ?? []).map((s) => {
             const row = s as unknown as {
               id: number;
               name: string;
               dob: string | null;
               center_id: number;
               profile_picture_url: string | null;
-              enrollments: { classrooms: { id: number; name: string } | null }[];
+              enrollments: { classroom_id: number }[];
             };
             return {
               id: row.id,
@@ -102,9 +110,7 @@ export function NewAssessmentModal({
               dob: row.dob,
               center_id: row.center_id,
               profile_picture_url: row.profile_picture_url,
-              classes: row.enrollments
-                .map((e) => e.classrooms)
-                .filter((c): c is { id: number; name: string } => !!c),
+              classroom_ids: row.enrollments.map((e) => e.classroom_id),
             } satisfies StudentLite;
           });
           setStudents(list);
@@ -123,14 +129,25 @@ export function NewAssessmentModal({
     return () => {
       active = false;
     };
-  }, [presetStudent]);
+  }, [bulk]);
 
   const framework = frameworks.find((f) => String(f.id) === frameworkId) ?? null;
-  const selectedStudent = students.find((s) => String(s.id) === studentId) ?? null;
-  const studentDob = presetStudent ? presetStudent.dob : selectedStudent?.dob ?? null;
   const model = framework ? modelMeta(framework.scoring_model) : null;
+  const selectedClass = classrooms.find((c) => String(c.id) === classId) ?? null;
+  const centerId = presetStudent ? presetStudent.center_id : selectedClass?.center_id ?? null;
 
-  // Load sections for the chosen framework and pick a sensible default.
+  const studentsInClass = useMemo(
+    () => (classId ? students.filter((s) => s.classroom_ids.includes(Number(classId))) : []),
+    [students, classId],
+  );
+  const allSelected = studentsInClass.length > 0 && studentsInClass.every((s) => selectedIds.has(s.id));
+
+  // Reset student ticks when the classroom changes.
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [classId]);
+
+  // Load sections + pick a sensible default when the framework changes.
   useEffect(() => {
     let active = true;
     if (!framework) {
@@ -145,10 +162,11 @@ export function NewAssessmentModal({
       if (framework.scoring_model === 'rubric') {
         setSectionId(secs[0] ? String(secs[0].id) : '');
       } else if (framework.scoring_model === 'screening') {
-        setSectionId(''); // default: all developmental areas
+        setSectionId('');
       } else {
-        const months = ageInMonths(studentDob);
-        const fit = secs.find((s) => ageFitsSection(months, s));
+        // checklist: best-fit age band for the (preset) child, else first
+        const months = ageInMonths(presetStudent?.dob ?? null);
+        const fit = presetStudent ? secs.find((s) => ageFitsSection(months, s)) : null;
         setSectionId(String((fit ?? secs[0])?.id ?? ''));
       }
     })();
@@ -156,29 +174,7 @@ export function NewAssessmentModal({
       active = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [framework?.id, studentId]);
-
-  // Group filtered students by classroom (a child in several rooms shows in each).
-  const grouped = useMemo(() => {
-    const q = studentSearch.trim().toLowerCase();
-    const matched = q ? students.filter((s) => s.name.toLowerCase().includes(q)) : students;
-    const byClass = new Map<string, StudentLite[]>();
-    for (const s of matched) {
-      const names = s.classes.length ? s.classes.map((c) => c.name) : [NO_CLASS];
-      for (const name of names) {
-        const arr = byClass.get(name) ?? [];
-        arr.push(s);
-        byClass.set(name, arr);
-      }
-    }
-    return [...byClass.entries()]
-      .sort((a, b) => {
-        if (a[0] === NO_CLASS) return 1;
-        if (b[0] === NO_CLASS) return -1;
-        return a[0].localeCompare(b[0]);
-      })
-      .map(([name, list]) => ({ name, students: list }));
-  }, [students, studentSearch]);
+  }, [framework?.id]);
 
   const sectionOptions = useMemo(() => {
     const opts = sections.map((s) => ({
@@ -191,7 +187,6 @@ export function NewAssessmentModal({
     return opts;
   }, [sections, framework]);
 
-  const centerId = presetStudent ? presetStudent.center_id : selectedStudent?.center_id ?? null;
   const examOptions = useMemo(() => {
     const list = centerId != null ? exams.filter((e) => e.center_id === centerId) : exams;
     return [
@@ -200,166 +195,204 @@ export function NewAssessmentModal({
     ];
   }, [exams, centerId]);
 
-  const needsSection = framework?.scoring_model === 'checklist';
-  const canCreate = !!studentId && !!framework && (!needsSection || sectionId !== '') && !saving;
+  const toggleStudent = (id: number) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const toggleAll = () =>
+    setSelectedIds((prev) => {
+      if (studentsInClass.every((s) => prev.has(s.id))) return new Set();
+      return new Set(studentsInClass.map((s) => s.id));
+    });
 
-  const create = async () => {
-    if (!studentId || !framework || centerId == null) return;
+  const needsSection = framework?.scoring_model === 'checklist';
+  const sectionReady = !needsSection || sectionId !== '';
+  const canCreate = bulk
+    ? !!selectedClass && selectedIds.size > 0 && !!framework && sectionReady && !saving
+    : !!framework && sectionReady && !saving;
+
+  const submit = async () => {
+    if (!framework) return;
     setSaving(true);
     setError(null);
+    const section = sectionId === '' ? null : Number(sectionId);
+    const exam = examId === '' ? null : Number(examId);
     try {
-      const { data, error: insErr } = await supabase
-        .from('student_assessments')
-        .insert({
-          center_id: centerId,
-          student_id: Number(studentId),
+      if (bulk) {
+        if (!selectedClass || selectedIds.size === 0) return;
+        const rows = [...selectedIds].map((sid) => ({
+          center_id: selectedClass.center_id,
+          student_id: sid,
           framework_id: framework.id,
-          section_id: sectionId === '' ? null : Number(sectionId),
-          exam_id: examId === '' ? null : Number(examId),
-          status: 'draft',
-        })
-        .select('id')
-        .single();
-      if (insErr) throw insErr;
-      onCreated(data.id);
+          section_id: section,
+          exam_id: exam,
+          status: 'draft' as const,
+        }));
+        const { error: insErr } = await supabase.from('student_assessments').insert(rows);
+        if (insErr) throw insErr;
+        onBulkCreated?.(rows.length);
+      } else if (presetStudent) {
+        const { data, error: insErr } = await supabase
+          .from('student_assessments')
+          .insert({
+            center_id: presetStudent.center_id,
+            student_id: presetStudent.id,
+            framework_id: framework.id,
+            section_id: section,
+            exam_id: exam,
+            status: 'draft',
+          })
+          .select('id')
+          .single();
+        if (insErr) throw insErr;
+        onCreated?.(data.id);
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not start the assessment.');
+      setError(e instanceof Error ? e.message : 'Could not create the assessment.');
       setSaving(false);
     }
   };
 
+  const detailsBlock = (
+    <>
+      <Field label="Framework">
+        <Select
+          value={frameworkId}
+          onChange={setFrameworkId}
+          options={[
+            { value: '', label: 'Choose a framework…' },
+            ...frameworks.map((f) => ({ value: String(f.id), label: f.name })),
+          ]}
+        />
+      </Field>
+
+      {framework && model ? (
+        <div style={{ fontSize: 13, color: Brand.onSurfaceVariant, marginTop: -6 }}>
+          {model.icon} {model.label}
+          {framework.description ? ` — ${framework.description}` : ''}
+        </div>
+      ) : null}
+
+      {framework && framework.scoring_model !== 'rubric' && sectionOptions.length > 0 ? (
+        <Field label={framework.scoring_model === 'checklist' ? 'Age band' : 'Area'}>
+          <Select value={sectionId} onChange={setSectionId} options={sectionOptions} />
+        </Field>
+      ) : null}
+
+      {examOptions.length > 1 ? (
+        <Field label="Examination (optional)">
+          <Select value={examId} onChange={setExamId} options={examOptions} />
+        </Field>
+      ) : null}
+    </>
+  );
+
+  const createLabel = bulk
+    ? `Create ${selectedIds.size || ''} draft${selectedIds.size === 1 ? '' : 's'}`.replace('  ', ' ').trim()
+    : 'Start assessment';
+
   return (
-    <Modal title="New assessment" onClose={saving ? () => {} : onClose} width={presetStudent ? 480 : 520}>
+    <Modal title="New assessment" onClose={saving ? () => {} : onClose} width={bulk ? 560 : 480}>
       {loading ? (
         <div style={{ padding: '24px 0', display: 'flex', justifyContent: 'center' }}>
           <Spinner />
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {!presetStudent ? (
-            <Field label="Student">
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <TextInput
-                  value={studentSearch}
-                  onChange={setStudentSearch}
-                  placeholder="Search students…"
+          {bulk ? (
+            <>
+              <Field label="Classroom">
+                <Select
+                  value={classId}
+                  onChange={setClassId}
+                  options={[
+                    { value: '', label: 'Choose a classroom…' },
+                    ...classrooms.map((c) => ({ value: String(c.id), label: c.name })),
+                  ]}
                 />
-                <div
-                  style={{
-                    maxHeight: 200,
-                    overflowY: 'auto',
-                    border: `1px solid ${Brand.outlineVariant}`,
-                    borderRadius: Radius.md,
-                  }}
-                >
-                  {grouped.length === 0 ? (
-                    <div style={{ padding: '16px', fontSize: 13.5, color: Brand.onSurfaceVariant }}>
-                      No students found.
-                    </div>
-                  ) : (
-                    grouped.map((g) => (
-                      <div key={g.name}>
-                        <div
+              </Field>
+
+              {classId ? (
+                <Field label="Students">
+                  <div
+                    style={{
+                      border: `1px solid ${Brand.outlineVariant}`,
+                      borderRadius: Radius.md,
+                      maxHeight: 240,
+                      overflowY: 'auto',
+                    }}
+                  >
+                    {studentsInClass.length === 0 ? (
+                      <div style={{ padding: 14, fontSize: 13.5, color: Brand.onSurfaceVariant }}>
+                        No students enrolled in this classroom.
+                      </div>
+                    ) : (
+                      <>
+                        <label
                           style={{
-                            position: 'sticky',
-                            top: 0,
-                            padding: '7px 12px',
-                            fontSize: 11.5,
-                            fontWeight: 800,
-                            textTransform: 'uppercase',
-                            letterSpacing: 0.4,
-                            color: Brand.onSurfaceVariant,
-                            background: Brand.surfaceContainerLow,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 10,
+                            padding: '9px 12px',
                             borderBottom: `1px solid ${Brand.outlineVariant}`,
+                            background: Brand.surfaceContainerLow,
+                            cursor: 'pointer',
+                            fontWeight: 700,
+                            fontSize: 13.5,
+                            color: Brand.onSurface,
                           }}
                         >
-                          {g.name} · {g.students.length}
-                        </div>
-                        {g.students.map((s) => {
-                          const selected = String(s.id) === studentId;
-                          return (
-                            <button
-                              key={`${g.name}-${s.id}`}
-                              type="button"
-                              onClick={() => setStudentId(String(s.id))}
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 12,
-                                width: '100%',
-                                padding: '9px 12px',
-                                border: 'none',
-                                borderLeft: `3px solid ${selected ? Brand.primary : 'transparent'}`,
-                                background: selected ? Brand.primaryContainer : 'transparent',
-                                cursor: 'pointer',
-                                textAlign: 'left',
-                              }}
-                            >
-                              <Avatar
-                                name={s.name}
-                                size={32}
-                                src={s.profile_picture_url ? photos[s.profile_picture_url] : null}
-                              />
-                              <span
-                                style={{
-                                  flex: 1,
-                                  fontSize: 14,
-                                  fontWeight: selected ? 700 : 600,
-                                  color: selected ? Brand.onPrimaryContainer : Brand.onSurface,
-                                }}
-                              >
-                                {s.name}
-                              </span>
-                              {selected ? (
-                                <span style={{ color: Brand.onPrimaryContainer, fontWeight: 800 }}>✓</span>
-                              ) : null}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    ))
-                  )}
+                          <input type="checkbox" checked={allSelected} onChange={toggleAll} />
+                          Select all ({studentsInClass.length})
+                        </label>
+                        {studentsInClass.map((s, i) => (
+                          <label
+                            key={s.id}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 10,
+                              padding: '8px 12px',
+                              borderTop: i === 0 ? 'none' : `1px solid ${Brand.outlineVariant}`,
+                              cursor: 'pointer',
+                              background: selectedIds.has(s.id) ? Brand.primaryContainer + '33' : 'transparent',
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(s.id)}
+                              onChange={() => toggleStudent(s.id)}
+                            />
+                            <Avatar
+                              name={s.name}
+                              size={28}
+                              src={s.profile_picture_url ? photos[s.profile_picture_url] : null}
+                            />
+                            <span style={{ fontSize: 14, color: Brand.onSurface }}>{s.name}</span>
+                          </label>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                </Field>
+              ) : null}
+
+              {detailsBlock}
+            </>
+          ) : (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <Avatar name={presetStudent!.name} size={40} src={presetStudent!.photoUrl ?? null} />
+                <div style={{ fontSize: 14, color: Brand.onSurfaceVariant }}>
+                  Assessing <strong style={{ color: Brand.onSurface }}>{presetStudent!.name}</strong>
                 </div>
               </div>
-            </Field>
-          ) : (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <Avatar name={presetStudent.name} size={40} src={presetStudent.photoUrl ?? null} />
-              <div style={{ fontSize: 14, color: Brand.onSurfaceVariant }}>
-                Assessing <strong style={{ color: Brand.onSurface }}>{presetStudent.name}</strong>
-              </div>
-            </div>
+              {detailsBlock}
+            </>
           )}
-
-          {examOptions.length > 1 ? (
-            <Field label="Examination (optional)">
-              <Select value={examId} onChange={setExamId} options={examOptions} />
-            </Field>
-          ) : null}
-
-          <Field label="Framework">
-            <Select
-              value={frameworkId}
-              onChange={setFrameworkId}
-              options={[
-                { value: '', label: 'Choose a framework…' },
-                ...frameworks.map((f) => ({ value: String(f.id), label: f.name })),
-              ]}
-            />
-          </Field>
-
-          {framework && model ? (
-            <div style={{ fontSize: 13, color: Brand.onSurfaceVariant, marginTop: -6 }}>
-              {model.icon} {model.label}
-              {framework.description ? ` — ${framework.description}` : ''}
-            </div>
-          ) : null}
-
-          {framework && framework.scoring_model !== 'rubric' && sectionOptions.length > 0 ? (
-            <Field label={framework.scoring_model === 'checklist' ? 'Age band' : 'Area'}>
-              <Select value={sectionId} onChange={setSectionId} options={sectionOptions} />
-            </Field>
-          ) : null}
 
           {error ? (
             <div
@@ -379,8 +412,8 @@ export function NewAssessmentModal({
             <Button variant="secondary" onClick={onClose} disabled={saving}>
               Cancel
             </Button>
-            <Button onClick={create} disabled={!canCreate}>
-              {saving ? <Spinner size={16} /> : 'Start assessment'}
+            <Button onClick={submit} disabled={!canCreate}>
+              {saving ? <Spinner size={16} /> : createLabel}
             </Button>
           </div>
         </div>
