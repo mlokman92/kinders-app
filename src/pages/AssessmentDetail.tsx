@@ -13,7 +13,9 @@ import {
   PageHeader,
   Spinner,
   TextInput,
+  Textarea,
 } from '@/components/ui';
+import { downloadAssessmentPdf } from '@/lib/assessmentPdf';
 import {
   formatAgeBand,
   loadCatalog,
@@ -33,9 +35,11 @@ type Header = {
   notes: string | null;
   framework_id: number;
   section_id: number | null;
+  exam_id: number | null;
   student_id: number;
   students: { name: string; dob: string | null } | null;
   assessment_frameworks: { name: string; scoring_model: string; description: string | null } | null;
+  exams: { name: string; term: string | null; year: number | null } | null;
 };
 
 const EMPTY: ResultValue = { achieved: null, level: null, observed_on: null, note: null };
@@ -53,6 +57,9 @@ export function AssessmentDetail() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedNote, setSavedNote] = useState<string | null>(null);
+  const [comment, setComment] = useState('');
+  const [commentDirty, setCommentDirty] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   const today = new Date().toISOString().slice(0, 10);
 
@@ -65,7 +72,7 @@ export function AssessmentDetail() {
         const { data: h, error: hErr } = await supabase
           .from('student_assessments')
           .select(
-            'id, status, assessed_on, notes, framework_id, section_id, student_id, students(name, dob), assessment_frameworks(name, scoring_model, description)',
+            'id, status, assessed_on, notes, framework_id, section_id, exam_id, student_id, students(name, dob), assessment_frameworks(name, scoring_model, description), exams(name, term, year)',
           )
           .eq('id', aid)
           .maybeSingle();
@@ -94,6 +101,8 @@ export function AssessmentDetail() {
           };
         }
         setHeader(head);
+        setComment(head.notes ?? '');
+        setCommentDirty(false);
         setCatalog(cat);
         setValues(map);
       } catch (e) {
@@ -123,7 +132,7 @@ export function AssessmentDetail() {
   };
 
   const save = async (): Promise<boolean> => {
-    if (dirty.size === 0) return true;
+    if (dirty.size === 0 && !commentDirty) return true;
     setSaving(true);
     setError(null);
     try {
@@ -155,9 +164,10 @@ export function AssessmentDetail() {
       }
       await supabase
         .from('student_assessments')
-        .update({ updated_at: new Date().toISOString() })
+        .update({ notes: comment.trim() ? comment : null, updated_at: new Date().toISOString() })
         .eq('id', aid);
       setDirty(new Set());
+      setCommentDirty(false);
       setSavedNote('Saved');
       return true;
     } catch (e) {
@@ -201,6 +211,36 @@ export function AssessmentDetail() {
 
   const meta = header.assessment_frameworks ? modelMeta(header.assessment_frameworks.scoring_model) : null;
   const completed = header.status === 'completed';
+  const hasChanges = dirty.size > 0 || commentDirty;
+
+  const downloadPdf = async () => {
+    setPdfBusy(true);
+    setError(null);
+    try {
+      await downloadAssessmentPdf(aid);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not generate the PDF.');
+    } finally {
+      setPdfBusy(false);
+    }
+  };
+
+  const actionButtons = (
+    <>
+      <Button variant="secondary" onClick={save} disabled={saving || !hasChanges}>
+        {saving ? <Spinner size={16} /> : hasChanges ? (dirty.size ? `Save (${dirty.size})` : 'Save') : 'Saved'}
+      </Button>
+      {completed ? (
+        <Button variant="outline" onClick={() => setStatus('draft')} disabled={saving}>
+          Reopen
+        </Button>
+      ) : (
+        <Button onClick={() => setStatus('completed')} disabled={saving}>
+          Mark complete
+        </Button>
+      )}
+    </>
+  );
 
   return (
     <div>
@@ -210,18 +250,10 @@ export function AssessmentDetail() {
         actions={
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             {backLink}
-            <Button variant="secondary" onClick={save} disabled={saving || dirty.size === 0}>
-              {saving ? <Spinner size={16} /> : dirty.size ? `Save (${dirty.size})` : 'Saved'}
+            <Button variant="secondary" onClick={downloadPdf} disabled={pdfBusy}>
+              {pdfBusy ? <Spinner size={16} /> : 'PDF'}
             </Button>
-            {completed ? (
-              <Button variant="outline" onClick={() => setStatus('draft')} disabled={saving}>
-                Reopen
-              </Button>
-            ) : (
-              <Button onClick={() => setStatus('completed')} disabled={saving}>
-                Mark complete
-              </Button>
-            )}
+            {actionButtons}
           </div>
         }
       />
@@ -230,6 +262,7 @@ export function AssessmentDetail() {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 14, color: Brand.onSurfaceVariant }}>
             {meta ? `${meta.icon} ${meta.label}` : ''} · {formatDisplayDate(parseISODate(header.assessed_on))}
+            {header.exams?.name ? ` · 📋 ${header.exams.name}` : ''}
           </div>
           {header.assessment_frameworks?.description ? (
             <div style={{ fontSize: 13, color: Brand.onSurfaceVariant, marginTop: 4, lineHeight: 1.45 }}>
@@ -243,6 +276,22 @@ export function AssessmentDetail() {
             {answered} / {allItems.length} recorded
           </Badge>
         </div>
+      </Card>
+
+      <Card style={{ marginTop: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: Brand.onSurface, marginBottom: 8 }}>
+          Teacher's comment
+        </div>
+        <Textarea
+          value={comment}
+          onChange={(t) => {
+            setComment(t);
+            setCommentDirty(true);
+            setSavedNote(null);
+          }}
+          placeholder="Overall comment for this child's assessment…"
+          rows={3}
+        />
       </Card>
 
       {error ? <div style={{ marginTop: 16 }}><ErrorState message={error} /></div> : null}
@@ -304,6 +353,20 @@ export function AssessmentDetail() {
             ))}
           </section>
         ))}
+      </div>
+
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'flex-end',
+          alignItems: 'center',
+          gap: 10,
+          marginTop: 28,
+          paddingTop: 16,
+          borderTop: `1px solid ${Brand.outlineVariant}`,
+        }}
+      >
+        {actionButtons}
       </div>
     </div>
   );

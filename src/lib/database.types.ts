@@ -727,6 +727,47 @@ export type Database = {
           },
         ]
       }
+      exams: {
+        Row: {
+          center_id: number
+          created_at: string
+          ends_on: string | null
+          id: number
+          name: string
+          starts_on: string | null
+          term: string | null
+          year: number | null
+        }
+        Insert: {
+          center_id: number
+          created_at?: string
+          ends_on?: string | null
+          id?: never
+          name: string
+          starts_on?: string | null
+          term?: string | null
+          year?: number | null
+        }
+        Update: {
+          center_id?: number
+          created_at?: string
+          ends_on?: string | null
+          id?: never
+          name?: string
+          starts_on?: string | null
+          term?: string | null
+          year?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "exams_center_id_fkey"
+            columns: ["center_id"]
+            isOneToOne: false
+            referencedRelation: "centers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       guardians: {
         Row: {
           created_at: string
@@ -994,6 +1035,7 @@ export type Database = {
           assessed_on: string
           center_id: number
           created_at: string
+          exam_id: number | null
           framework_id: number
           id: number
           notes: string | null
@@ -1007,6 +1049,7 @@ export type Database = {
           assessed_on?: string
           center_id: number
           created_at?: string
+          exam_id?: number | null
           framework_id: number
           id?: never
           notes?: string | null
@@ -1020,6 +1063,7 @@ export type Database = {
           assessed_on?: string
           center_id?: number
           created_at?: string
+          exam_id?: number | null
           framework_id?: number
           id?: never
           notes?: string | null
@@ -1041,6 +1085,13 @@ export type Database = {
             columns: ["center_id"]
             isOneToOne: false
             referencedRelation: "centers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "student_assessments_exam_id_fkey"
+            columns: ["exam_id"]
+            isOneToOne: false
+            referencedRelation: "exams"
             referencedColumns: ["id"]
           },
           {

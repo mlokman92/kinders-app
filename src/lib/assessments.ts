@@ -14,6 +14,7 @@ export type ScoringModel = 'checklist' | 'rubric' | 'screening';
 export type ItemKind = 'checklist' | 'standard' | 'milestone' | 'alert';
 
 export type Framework = Tables<'assessment_frameworks'>;
+export type Exam = Tables<'exams'>;
 export type Section = Tables<'assessment_sections'>;
 export type Domain = Tables<'assessment_domains'>;
 export type Item = Tables<'assessment_items'>;
@@ -82,6 +83,18 @@ export async function listFrameworks(): Promise<Framework[]> {
     .from('assessment_frameworks')
     .select('*')
     .order('sort');
+  if (error) throw error;
+  return data ?? [];
+}
+
+/** Center examinations the signed-in staff may see (RLS scopes to their center). */
+export async function listExams(centerId?: number): Promise<Exam[]> {
+  let q = supabase.from('exams').select('*');
+  if (centerId != null) q = q.eq('center_id', centerId);
+  const { data, error } = await q
+    .order('year', { ascending: false, nullsFirst: false })
+    .order('starts_on', { ascending: false, nullsFirst: false })
+    .order('name');
   if (error) throw error;
   return data ?? [];
 }

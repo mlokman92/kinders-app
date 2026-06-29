@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import {
+  Badge,
+  Button,
   Card,
   EmptyState,
   ErrorState,
@@ -9,6 +11,7 @@ import {
   Loading,
   PageHeader,
   Select,
+  Spinner,
   Stat,
   StatGrid,
   Table,
@@ -17,8 +20,10 @@ import {
   Toolbar,
   DateInput,
 } from '@/components/ui';
-import { ENTRY_EMOJI, entryLabel } from '@/constants/entry-actions';
-import { addDays, parseISODate, toISODate } from '@/lib/dates';
+import { ENTRY_ACTIONS, ENTRY_EMOJI, entryLabel } from '@/constants/entry-actions';
+import { addDays, formatDisplayDate, parseISODate, toISODate } from '@/lib/dates';
+import { entryTimeLabel, humanizeEntry } from '@/lib/entries';
+import { downloadEntriesReportPdf } from '@/lib/entriesPdf';
 import { supabase } from '@/lib/supabase';
 import { Brand, ENTRY_TYPE_COLORS, Radius } from '@/lib/theme';
 
@@ -28,20 +33,26 @@ type EntryRow = {
   id: number;
   type: string;
   entry_date: string;
+  created_at: string;
   student_id: number;
+  data: Record<string, unknown> | null;
+  media: { path: string; type: string }[] | null;
   students: { name: string } | null;
   classrooms: { name: string } | null;
+  entry_activities: ({ activities: { title: string } | null } | null)[] | null;
 };
 
 export function Reports() {
   const [classrooms, setClassrooms] = useState<ClassroomRow[]>([]);
   const [classroom, setClassroom] = useState('all');
+  const [type, setType] = useState('all');
   const [from, setFrom] = useState(() => toISODate(addDays(new Date(), -6)));
   const [to, setTo] = useState(() => toISODate(new Date()));
 
   const [entries, setEntries] = useState<EntryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   // Load classrooms for the filter once.
   useEffect(() => {
@@ -72,10 +83,14 @@ export function Reports() {
       try {
         let q = supabase
           .from('entries')
-          .select('id, type, entry_date, student_id, students(name), classrooms(name)')
+          .select(
+            'id, type, entry_date, created_at, student_id, data, media, students(name), classrooms(name), entry_activities(activities(title))',
+          )
           .gte('entry_date', from)
           .lte('entry_date', to)
-          .order('entry_date', { ascending: true });
+          .order('entry_date', { ascending: false })
+          .order('created_at', { ascending: false })
+          .limit(2000);
         if (classroom !== 'all') q = q.eq('classroom_id', Number(classroom));
         const { data, error: err } = await q;
         if (!active) return;
@@ -99,6 +114,51 @@ export function Reports() {
     ],
     [classrooms],
   );
+
+  const typeOptions = useMemo(
+    () => [{ label: 'All types', value: 'all' }, ...ENTRY_ACTIONS.map((a) => ({ label: a.label, value: a.key }))],
+    [],
+  );
+
+  // The actual reports feed: entries (optionally narrowed by type). The query already
+  // returns them newest-first (descending date, created_at).
+  const feedEntries = useMemo(
+    () => (type === 'all' ? entries : entries.filter((e) => e.type === type)),
+    [entries, type],
+  );
+
+  // Group the feed into day sections, preserving the newest-first order.
+  const feedByDate = useMemo(() => {
+    const groups: { date: string; rows: EntryRow[] }[] = [];
+    for (const e of feedEntries) {
+      const last = groups[groups.length - 1];
+      if (last && last.date === e.entry_date) last.rows.push(e);
+      else groups.push({ date: e.entry_date, rows: [e] });
+    }
+    return groups;
+  }, [feedEntries]);
+
+  const classroomName =
+    classroom === 'all'
+      ? 'All classrooms'
+      : classrooms.find((c) => String(c.id) === classroom)?.name ?? 'Classroom';
+
+  const downloadPdf = async () => {
+    setPdfBusy(true);
+    try {
+      await downloadEntriesReportPdf(feedEntries, {
+        from,
+        to,
+        classroomName,
+        typeLabel: type === 'all' ? 'All types' : entryLabel(type),
+        classrooms,
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not generate the PDF.');
+    } finally {
+      setPdfBusy(false);
+    }
+  };
 
   // Number of calendar days in the inclusive range (used for "avg per day").
   const rangeDays = useMemo(() => {
@@ -186,7 +246,15 @@ export function Reports() {
 
   return (
     <div>
-      <PageHeader title="Reports" subtitle="Journal-entry analytics across your center." />
+      <PageHeader
+        title="Reports"
+        subtitle="Journal entries logged across your center."
+        actions={
+          <Button onClick={downloadPdf} disabled={pdfBusy || feedEntries.length === 0}>
+            {pdfBusy ? <Spinner size={16} /> : 'Download PDF'}
+          </Button>
+        }
+      />
 
       <Toolbar>
         <Field label="Classroom">
@@ -208,6 +276,102 @@ export function Reports() {
         <EmptyState title="No entries in this range" icon="📭" />
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* The reports feed — the actual journal entries teachers logged */}
+          <div>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+                marginBottom: 12,
+                flexWrap: 'wrap',
+              }}
+            >
+              <h2 style={{ fontSize: 16, fontWeight: 800, color: Brand.onSurface, margin: 0 }}>Entries</h2>
+              <div style={{ width: 200 }}>
+                <Select value={type} onChange={setType} options={typeOptions} />
+              </div>
+            </div>
+
+            {feedByDate.length === 0 ? (
+              <Card style={{ textAlign: 'center', color: Brand.onSurfaceVariant, fontSize: 14 }}>
+                No {entryLabel(type).toLowerCase()} entries in this range.
+              </Card>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                {feedByDate.map((day) => (
+                  <Card key={day.date} padding={0}>
+                    <div
+                      style={{
+                        padding: '12px 18px',
+                        fontSize: 13.5,
+                        fontWeight: 800,
+                        color: Brand.onSurface,
+                        borderBottom: `1px solid ${Brand.outlineVariant}`,
+                        background: Brand.surfaceContainerLow,
+                      }}
+                    >
+                      {formatDisplayDate(parseISODate(day.date))}
+                    </div>
+                    {day.rows.map((e, i) => {
+                      const { summary, note } = humanizeEntry(e.type, e.data, classrooms);
+                      const activities = (e.entry_activities ?? [])
+                        .map((ea) => ea?.activities?.title)
+                        .filter((t): t is string => !!t);
+                      const desc = typeof e.data?.description === 'string' ? e.data.description.trim() : '';
+                      const main =
+                        e.type === 'activity' && activities.length
+                          ? [desc, activities.join(', ')].filter(Boolean).join(' — ')
+                          : summary;
+                      const mediaCount = e.media?.length ?? 0;
+                      const time = entryTimeLabel(e.data, e.created_at);
+                      return (
+                        <div
+                          key={e.id}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'flex-start',
+                            gap: 14,
+                            padding: '14px 18px',
+                            borderTop: i === 0 ? 'none' : `1px solid ${Brand.outlineVariant}`,
+                          }}
+                        >
+                          <div style={{ fontSize: 22, lineHeight: 1.1 }}>{ENTRY_EMOJI[e.type] ?? '•'}</div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+                              <Link
+                                to={`/students/${e.student_id}`}
+                                style={{ fontSize: 14.5, fontWeight: 700, color: Brand.onSurface }}
+                              >
+                                {e.students?.name ?? 'Student'}
+                              </Link>
+                              <span style={{ fontSize: 12.5, color: Brand.onSurfaceVariant }}>
+                                {[e.classrooms?.name, time].filter(Boolean).join(' · ')}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: 14, color: Brand.onSurface, marginTop: 2 }}>{main}</div>
+                            {note && note !== main ? (
+                              <div style={{ fontSize: 13, color: Brand.onSurfaceVariant, marginTop: 3 }}>
+                                {note}
+                              </div>
+                            ) : null}
+                            {mediaCount > 0 ? (
+                              <div style={{ fontSize: 12.5, color: Brand.onSurfaceVariant, marginTop: 4 }}>
+                                📷 {mediaCount} {mediaCount === 1 ? 'photo/video' : 'photos/videos'}
+                              </div>
+                            ) : null}
+                          </div>
+                          <Badge tone="neutral">{entryLabel(e.type)}</Badge>
+                        </div>
+                      );
+                    })}
+                  </Card>
+                ))}
+              </div>
+            )}
+          </div>
+
           <StatGrid>
             <Stat label="Total entries" value={stats.total} icon="📝" accent={Brand.primary} />
             <Stat

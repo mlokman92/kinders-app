@@ -19,7 +19,8 @@ import { ENTRY_EMOJI, entryLabel } from '@/constants/entry-actions';
 import { modelMeta } from '@/lib/assessments';
 import { useAuth } from '@/lib/auth';
 import { formatDisplayDate, parseISODate } from '@/lib/dates';
-import { humanizeEntry } from '@/lib/entries';
+import { entryTimeLabel, humanizeEntry } from '@/lib/entries';
+import { downloadStudentJournalPdf } from '@/lib/entriesPdf';
 import { getStudentPhotoUrl } from '@/lib/storage';
 import { supabase } from '@/lib/supabase';
 import { Brand } from '@/lib/theme';
@@ -97,6 +98,7 @@ export function StudentDetail() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [addContactOpen, setAddContactOpen] = useState(false);
   const [newAssessOpen, setNewAssessOpen] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   const reloadGuardians = async () => {
     const { data } = await supabase
@@ -193,6 +195,18 @@ export function StudentDetail() {
     }
   };
 
+  const downloadJournal = async () => {
+    setPdfBusy(true);
+    setActionError(null);
+    try {
+      await downloadStudentJournalPdf(sid);
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Could not generate the PDF.');
+    } finally {
+      setPdfBusy(false);
+    }
+  };
+
   const backLink = (
     <Link
       to="/students"
@@ -205,6 +219,11 @@ export function StudentDetail() {
   const headerActions = (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
       {backLink}
+      {isStaff ? (
+        <Button variant="secondary" onClick={downloadJournal} disabled={pdfBusy}>
+          {pdfBusy ? <Spinner size={16} /> : 'Journal PDF'}
+        </Button>
+      ) : null}
       {isStaff ? (
         <Button variant="secondary" onClick={() => navigate(`/students/${sid}/edit`)}>
           Edit
@@ -437,6 +456,7 @@ export function StudentDetail() {
               </div>
               {day.rows.map((e, i) => {
                 const { summary, note } = humanizeEntry(e.type, e.data, []);
+                const time = entryTimeLabel(e.data, e.created_at);
                 return (
                   <div
                     key={e.id}
@@ -457,7 +477,12 @@ export function StudentDetail() {
                         </div>
                       ) : null}
                     </div>
-                    <Badge tone="neutral">{entryLabel(e.type)}</Badge>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                      <Badge tone="neutral">{entryLabel(e.type)}</Badge>
+                      {time ? (
+                        <span style={{ fontSize: 11.5, color: Brand.onSurfaceVariant }}>{time}</span>
+                      ) : null}
+                    </div>
                   </div>
                 );
               })}

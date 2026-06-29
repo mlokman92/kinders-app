@@ -4,9 +4,11 @@ import {
   ageFitsSection,
   ageInMonths,
   formatAgeBand,
+  listExams,
   listFrameworks,
   listSections,
   modelMeta,
+  type Exam,
   type Framework,
   type Section,
 } from '@/lib/assessments';
@@ -54,11 +56,13 @@ export function NewAssessmentModal({
   const [students, setStudents] = useState<StudentLite[]>([]);
   const [photos, setPhotos] = useState<Record<string, string>>({});
   const [frameworks, setFrameworks] = useState<Framework[]>([]);
+  const [exams, setExams] = useState<Exam[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [studentId, setStudentId] = useState<string>(presetStudent ? String(presetStudent.id) : '');
   const [studentSearch, setStudentSearch] = useState('');
+  const [examId, setExamId] = useState<string>('');
   const [frameworkId, setFrameworkId] = useState<string>('');
   const [sectionId, setSectionId] = useState<string>(''); // '' = all areas (screening) or unset
 
@@ -69,8 +73,9 @@ export function NewAssessmentModal({
     let active = true;
     (async () => {
       try {
-        const [fw, studsRes] = await Promise.all([
+        const [fw, exs, studsRes] = await Promise.all([
           listFrameworks(),
+          listExams(),
           presetStudent
             ? Promise.resolve(null)
             : supabase
@@ -80,6 +85,7 @@ export function NewAssessmentModal({
         ]);
         if (!active) return;
         setFrameworks(fw);
+        setExams(exs);
         if (studsRes && 'data' in studsRes) {
           const list = (studsRes.data ?? []).map((s) => {
             const row = s as unknown as {
@@ -185,11 +191,19 @@ export function NewAssessmentModal({
     return opts;
   }, [sections, framework]);
 
+  const centerId = presetStudent ? presetStudent.center_id : selectedStudent?.center_id ?? null;
+  const examOptions = useMemo(() => {
+    const list = centerId != null ? exams.filter((e) => e.center_id === centerId) : exams;
+    return [
+      { value: '', label: '— None —' },
+      ...list.map((e) => ({ value: String(e.id), label: e.year ? `${e.name} (${e.year})` : e.name })),
+    ];
+  }, [exams, centerId]);
+
   const needsSection = framework?.scoring_model === 'checklist';
   const canCreate = !!studentId && !!framework && (!needsSection || sectionId !== '') && !saving;
 
   const create = async () => {
-    const centerId = presetStudent ? presetStudent.center_id : selectedStudent?.center_id;
     if (!studentId || !framework || centerId == null) return;
     setSaving(true);
     setError(null);
@@ -201,6 +215,7 @@ export function NewAssessmentModal({
           student_id: Number(studentId),
           framework_id: framework.id,
           section_id: sectionId === '' ? null : Number(sectionId),
+          exam_id: examId === '' ? null : Number(examId),
           status: 'draft',
         })
         .select('id')
@@ -231,7 +246,7 @@ export function NewAssessmentModal({
                 />
                 <div
                   style={{
-                    maxHeight: 280,
+                    maxHeight: 200,
                     overflowY: 'auto',
                     border: `1px solid ${Brand.outlineVariant}`,
                     borderRadius: Radius.md,
@@ -315,6 +330,12 @@ export function NewAssessmentModal({
               </div>
             </div>
           )}
+
+          {examOptions.length > 1 ? (
+            <Field label="Examination (optional)">
+              <Select value={examId} onChange={setExamId} options={examOptions} />
+            </Field>
+          ) : null}
 
           <Field label="Framework">
             <Select

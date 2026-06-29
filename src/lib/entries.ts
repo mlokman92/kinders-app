@@ -93,6 +93,56 @@ export function to12h(hhmm: string): string {
   return `${h}:${m[2]} ${ampm}`;
 }
 
+/**
+ * Best-effort clock label for an entry: a logged time field (`time`/`start_time`) if present,
+ * otherwise the `created_at` wall-clock. Returns '' when neither is usable.
+ */
+export function entryTimeLabel(
+  data: Record<string, unknown> | null,
+  createdAt: string | null,
+): string {
+  const candidate = data?.time ?? data?.start_time;
+  if (typeof candidate === 'string' && /^\d{1,2}:\d{2}$/.test(candidate.trim())) {
+    return to12h(candidate.trim());
+  }
+  if (createdAt) {
+    const d = new Date(createdAt);
+    if (!Number.isNaN(d.getTime())) {
+      return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+    }
+  }
+  return '';
+}
+
+/**
+ * Compact, single-line, plain-text detail for a journal entry — used by the reports feed
+ * and PDF exports. Combines the humanized summary with picked activity titles, an optional
+ * note, and a media count. (For rich on-screen rendering, prefer `humanizeEntry` directly.)
+ */
+export function entryReportLine(
+  type: string,
+  data: Record<string, unknown> | null,
+  opts: { activities?: string[]; mediaCount?: number; classrooms?: ClassroomRef[] } = {},
+): string {
+  const { summary, note } = humanizeEntry(type, data, opts.classrooms ?? []);
+  const activities = (opts.activities ?? []).filter(Boolean);
+  const parts: string[] = [];
+
+  if (type === 'activity' && activities.length) {
+    // Prefer the picked activity titles; keep any free-text description alongside them.
+    const desc = typeof data?.description === 'string' ? data.description.trim() : '';
+    parts.push([desc, activities.join(', ')].filter(Boolean).join(' — '));
+  } else if (summary) {
+    parts.push(summary);
+  }
+
+  if (note && note !== summary) parts.push(note);
+  if (opts.mediaCount && opts.mediaCount > 0) {
+    parts.push(`${opts.mediaCount} ${opts.mediaCount === 1 ? 'photo/video' : 'photos/videos'}`);
+  }
+  return parts.join(' · ');
+}
+
 export type HumanizedEntry = { summary: string; note?: string };
 
 const TOILET_PHRASE: Record<string, string> = {

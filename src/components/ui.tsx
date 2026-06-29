@@ -617,6 +617,8 @@ export function Modal({
           padding: 24,
           width: '100%',
           maxWidth: width,
+          maxHeight: '88vh',
+          overflowY: 'auto',
         }}
       >
         <h2 style={{ fontSize: 18, fontWeight: 800, color: Brand.onSurface, marginBottom: 10 }}>
