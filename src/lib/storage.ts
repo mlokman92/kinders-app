@@ -45,5 +45,27 @@ export async function getStudentPhotoUrls(
   return map;
 }
 
+/** Private bucket for journal entry photos/videos (signed URLs only). */
+const ENTRY_MEDIA_BUCKET = 'entry-media';
+
+/**
+ * Batch-create signed URLs for many entry-media paths in one request.
+ * Returns a map of path → signed URL (paths that fail to sign are omitted).
+ * Mirrors the mobile app's `getEntryMediaUrls`.
+ */
+export async function getEntryMediaUrls(
+  paths: string[],
+  expiresInSeconds = 3600,
+): Promise<Record<string, string>> {
+  const unique = [...new Set(paths.filter(Boolean))];
+  if (unique.length === 0) return {};
+  const { data } = await supabase.storage.from(ENTRY_MEDIA_BUCKET).createSignedUrls(unique, expiresInSeconds);
+  const map: Record<string, string> = {};
+  for (const item of data ?? []) {
+    if (item.path && item.signedUrl) map[item.path] = item.signedUrl;
+  }
+  return map;
+}
+
 // Center logos are stored inline (data-URI) via update_center_settings — see
 // lib/image.ts. No Storage bucket is involved for logos.

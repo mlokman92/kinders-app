@@ -20,10 +20,10 @@ import { modelMeta } from '@/lib/assessments';
 import { useAuth } from '@/lib/auth';
 import { formatDisplayDate, parseISODate } from '@/lib/dates';
 import { entryTimeLabel, humanizeEntry } from '@/lib/entries';
-import { downloadStudentJournalPdf } from '@/lib/entriesPdf';
-import { getStudentPhotoUrl } from '@/lib/storage';
+import { downloadStudentDailyReportPdf, downloadStudentJournalPdf } from '@/lib/entriesPdf';
+import { getEntryMediaUrls, getStudentPhotoUrl } from '@/lib/storage';
 import { supabase } from '@/lib/supabase';
-import { Brand } from '@/lib/theme';
+import { Brand, Radius } from '@/lib/theme';
 
 type Student = {
   id: number;
@@ -64,6 +64,7 @@ type EntryRow = {
   entry_date: string;
   created_at: string;
   data: Record<string, unknown> | null;
+  media: { path: string; type: 'image' | 'video' }[] | null;
 };
 
 /** Whole-year age from a YYYY-MM-DD date of birth, or null if unparseable. */
@@ -89,6 +90,7 @@ export function StudentDetail() {
   const [enrollments, setEnrollments] = useState<EnrollmentRow[]>([]);
   const [guardians, setGuardians] = useState<GuardianRow[]>([]);
   const [entries, setEntries] = useState<EntryRow[]>([]);
+  const [mediaUrls, setMediaUrls] = useState<Record<string, string>>({});
   const [assessments, setAssessments] = useState<AssessmentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -99,6 +101,7 @@ export function StudentDetail() {
   const [addContactOpen, setAddContactOpen] = useState(false);
   const [newAssessOpen, setNewAssessOpen] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [dailyBusy, setDailyBusy] = useState<string | null>(null);
 
   const reloadGuardians = async () => {
     const { data } = await supabase
@@ -133,7 +136,7 @@ export function StudentDetail() {
             .eq('student_id', sid),
           supabase
             .from('entries')
-            .select('id, type, entry_date, created_at, data')
+            .select('id, type, entry_date, created_at, data, media')
             .eq('student_id', sid)
             .order('entry_date', { ascending: false })
             .order('created_at', { ascending: false })
@@ -157,8 +160,16 @@ export function StudentDetail() {
         setStudent(loadedStudent);
         setEnrollments((enrollRes.data ?? []) as unknown as EnrollmentRow[]);
         setGuardians((guardianRes.data ?? []) as unknown as GuardianRow[]);
-        setEntries((entriesRes.data ?? []) as unknown as EntryRow[]);
+        const entryRows = (entriesRes.data ?? []) as unknown as EntryRow[];
+        setEntries(entryRows);
         setAssessments((assessRes.data ?? []) as unknown as AssessmentRow[]);
+
+        // Sign the entry-media paths so the journal can show the attached photos/videos.
+        const mediaPaths = entryRows.flatMap((e) => (e.media ?? []).map((m) => m.path)).filter(Boolean);
+        if (mediaPaths.length > 0) {
+          const urls = await getEntryMediaUrls(mediaPaths);
+          if (active) setMediaUrls(urls);
+        }
         if (loadedStudent?.profile_picture_url) {
           const url = await getStudentPhotoUrl(loadedStudent.profile_picture_url);
           if (active) setPhotoUrl(url);
@@ -204,6 +215,18 @@ export function StudentDetail() {
       setActionError(e instanceof Error ? e.message : 'Could not generate the PDF.');
     } finally {
       setPdfBusy(false);
+    }
+  };
+
+  const downloadDaily = async (date: string) => {
+    setDailyBusy(date);
+    setActionError(null);
+    try {
+      await downloadStudentDailyReportPdf(sid, date);
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Could not generate the PDF.');
+    } finally {
+      setDailyBusy(null);
     }
   };
 
@@ -444,15 +467,26 @@ export function StudentDetail() {
             <Card key={day.date} padding={0}>
               <div
                 style={{
-                  padding: '12px 18px',
-                  fontSize: 13.5,
-                  fontWeight: 800,
-                  color: Brand.onSurface,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                  padding: '8px 12px 8px 18px',
                   borderBottom: `1px solid ${Brand.outlineVariant}`,
                   background: Brand.surfaceContainerLow,
                 }}
               >
-                {formatDisplayDate(parseISODate(day.date))}
+                <span style={{ fontSize: 13.5, fontWeight: 800, color: Brand.onSurface }}>
+                  {formatDisplayDate(parseISODate(day.date))}
+                </span>
+                <Button
+                  variant="secondary"
+                  onClick={() => downloadDaily(day.date)}
+                  disabled={dailyBusy !== null}
+                  style={{ padding: '5px 12px', fontSize: 12.5 }}
+                >
+                  {dailyBusy === day.date ? <Spinner size={14} /> : 'Download'}
+                </Button>
               </div>
               {day.rows.map((e, i) => {
                 const { summary, note } = humanizeEntry(e.type, e.data, []);
@@ -474,6 +508,28 @@ export function StudentDetail() {
                       {note ? (
                         <div style={{ fontSize: 13, color: Brand.onSurfaceVariant, marginTop: 3 }}>
                           {note}
+                        </div>
+                      ) : null}
+                      {(e.media ?? []).length > 0 ? (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                          {(e.media ?? []).map((m, idx) => {
+                            const url = mediaUrls[m.path];
+                            if (!url) return null;
+                            const box = {
+                              width: 116,
+                              height: 116,
+                              borderRadius: Radius.md,
+                              objectFit: 'cover' as const,
+                              background: Brand.surfaceContainerHigh,
+                            };
+                            return m.type === 'video' ? (
+                              <video key={idx} src={url} controls preload="metadata" style={box} />
+                            ) : (
+                              <a key={idx} href={url} target="_blank" rel="noreferrer">
+                                <img src={url} alt="" loading="lazy" style={{ ...box, display: 'block' }} />
+                              </a>
+                            );
+                          })}
                         </div>
                       ) : null}
                     </div>
