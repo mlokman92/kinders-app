@@ -171,9 +171,33 @@ export function Badge({
 
 /* ---------------------------------------------------------------- Avatar */
 
-export function Avatar({ name, size = 36 }: { name: string; size?: number }) {
-  const initials = name
-    .trim()
+export function Avatar({
+  name,
+  size = 36,
+  src,
+}: {
+  name: string | null;
+  size?: number;
+  src?: string | null;
+}) {
+  const safeName = (name ?? '').trim();
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt={safeName}
+        style={{
+          width: size,
+          height: size,
+          borderRadius: Radius.full,
+          objectFit: 'cover',
+          flexShrink: 0,
+          background: Brand.surfaceContainerHigh,
+        }}
+      />
+    );
+  }
+  const initials = safeName
     .split(/\s+/)
     .slice(0, 2)
     .map((w) => w[0]?.toUpperCase() ?? '')
@@ -469,6 +493,39 @@ export function TextInput({
   );
 }
 
+export function Textarea({
+  value,
+  onChange,
+  placeholder,
+  rows = 4,
+  style,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  rows?: number;
+  style?: CSSProperties;
+}) {
+  return (
+    <textarea
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      rows={rows}
+      style={{
+        ...controlStyle,
+        height: 'auto',
+        width: '100%',
+        padding: '10px 12px',
+        resize: 'vertical',
+        fontFamily: 'inherit',
+        lineHeight: 1.5,
+        ...style,
+      }}
+    />
+  );
+}
+
 /** A horizontal toolbar that wraps filter controls. */
 export function Toolbar({ children }: { children: ReactNode }) {
   return (
@@ -482,6 +539,91 @@ export function Toolbar({ children }: { children: ReactNode }) {
       }}
     >
       {children}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ Chip */
+
+/** A toggleable pill chip for single/multi selections (days, status, etc.). */
+export function Chip({
+  label,
+  selected,
+  onClick,
+  disabled,
+}: {
+  label: string;
+  selected?: boolean;
+  onClick?: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        border: `1px solid ${selected ? Brand.primary : Brand.outlineVariant}`,
+        background: selected ? Brand.primaryContainer : Brand.white,
+        color: selected ? Brand.onPrimaryContainer : Brand.onSurface,
+        borderRadius: Radius.full,
+        padding: '7px 14px',
+        fontSize: 13.5,
+        fontWeight: 600,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.5 : 1,
+        transition: 'background 0.12s, border-color 0.12s',
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+/* ----------------------------------------------------------------- Modal */
+
+/** A centered modal dialog over a dimmed backdrop. Click outside or Esc closes. */
+export function Modal({
+  title,
+  children,
+  onClose,
+  width = 420,
+}: {
+  title: string;
+  children: ReactNode;
+  onClose: () => void;
+  width?: number;
+}) {
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(15, 23, 23, 0.45)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 100,
+        padding: 16,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: Brand.white,
+          borderRadius: Radius.lg,
+          boxShadow: 'var(--shadow-card)',
+          padding: 24,
+          width: '100%',
+          maxWidth: width,
+        }}
+      >
+        <h2 style={{ fontSize: 18, fontWeight: 800, color: Brand.onSurface, marginBottom: 10 }}>
+          {title}
+        </h2>
+        {children}
+      </div>
     </div>
   );
 }

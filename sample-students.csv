@@ -1,0 +1,6 @@
+name,dob,gender,classroom,status,enrollment_date,days,guardian1_name,guardian1_email,guardian1_phone,guardian1_relationship,guardian2_name,guardian2_email,guardian2_phone,guardian2_relationship
+Aisha Rahman,2021-03-14,female,,,,,Nadia Rahman,nadia.rahman@example.com,012-3456789,parent,Imran Rahman,imran.rahman@example.com,019-8765432,parent
+Daniel Tan,2020-11-02,male,,,,,Mei Ling Tan,mei.tan@example.com,013-2223344,parent,,,,
+"Lee, Wei Jie",2022-01-20,male,,,,,Grace Lee,grace.lee@example.com,,guardian,,,,
+Sofia Abdullah,,,,,,,,,,,,,,
+Anya Sharma,2021-07-09,female,,,,,Raj Sharma,raj.sharma@example.com,011-5566778,parent,,,,

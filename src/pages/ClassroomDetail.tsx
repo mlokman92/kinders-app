@@ -1,27 +1,35 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 
+import { MultiSelectModal, type PickOption } from '@/components/MultiSelectModal';
 import {
   Avatar,
   Badge,
+  Button,
   Card,
   EmptyState,
   ErrorState,
+  Field,
   Loading,
+  Modal,
   PageHeader,
+  Spinner,
   Stat,
   StatGrid,
   Table,
   Td,
+  TextInput,
   Th,
 } from '@/components/ui';
 import { ENTRY_EMOJI, entryLabel } from '@/constants/entry-actions';
+import { useAuth } from '@/lib/auth';
 import { parseISODate } from '@/lib/dates';
 import { humanizeEntry } from '@/lib/entries';
+import { getStudentPhotoUrls } from '@/lib/storage';
 import { supabase } from '@/lib/supabase';
 import { Brand } from '@/lib/theme';
 
-type ClassroomRow = { id: number; name: string };
+type ClassroomRow = { id: number; name: string; center_id: number };
 
 type EnrollmentRow = {
   id: number;
@@ -57,16 +65,89 @@ function ageFromDob(dob: string | null): string {
   return `${years} yr`;
 }
 
+/** Precise age as years + months (e.g. "3 yr 4 mo"), or undefined if unknown. */
+function ageYearsMonths(dob: string | null): string | undefined {
+  if (!dob) return undefined;
+  const birth = parseISODate(dob);
+  const now = new Date();
+  let months =
+    (now.getFullYear() - birth.getFullYear()) * 12 + (now.getMonth() - birth.getMonth());
+  if (now.getDate() < birth.getDate()) months -= 1;
+  if (months < 0) return undefined;
+  const years = Math.floor(months / 12);
+  const rem = months % 12;
+  if (years === 0) return `${rem} mo`;
+  if (rem === 0) return `${years} yr`;
+  return `${years} yr ${rem} mo`;
+}
+
+function ActionLink({
+  onClick,
+  children,
+  tone = 'primary',
+}: {
+  onClick: () => void;
+  children: React.ReactNode;
+  tone?: 'primary' | 'danger';
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        border: 'none',
+        background: 'transparent',
+        color: tone === 'danger' ? Brand.error : Brand.onPrimaryContainer,
+        fontSize: 13,
+        fontWeight: 700,
+        cursor: 'pointer',
+        padding: 0,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
 export function ClassroomDetail() {
   const { id } = useParams();
   const cid = Number(id);
+  const navigate = useNavigate();
+  const { role } = useAuth();
+  const isDirector = role === 'director';
 
   const [classroom, setClassroom] = useState<ClassroomRow | null>(null);
   const [enrollments, setEnrollments] = useState<EnrollmentRow[]>([]);
   const [assignments, setAssignments] = useState<AssignmentRow[]>([]);
   const [entries, setEntries] = useState<EntryRow[]>([]);
+  const [allStudents, setAllStudents] = useState<
+    {
+      id: number;
+      name: string;
+      center_id: number;
+      dob: string | null;
+      profile_picture_url: string | null;
+    }[]
+  >([]);
+  const [photoByPath, setPhotoByPath] = useState<Record<string, string>>({});
+  // student id → names of the classrooms they're currently enrolled in (any room).
+  const [studentClassrooms, setStudentClassrooms] = useState<Record<number, string[]>>({});
+  const [allTeachers, setAllTeachers] = useState<
+    { id: number; name: string; email: string; center_id: number }[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [picker, setPicker] = useState<'student' | 'teacher' | null>(null);
+
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
+  const [renaming, setRenaming] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
+
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -74,8 +155,8 @@ export function ClassroomDetail() {
       setLoading(true);
       setError(null);
       try {
-        const [classroomRes, enrollmentsRes, assignmentsRes, entriesRes] = await Promise.all([
-          supabase.from('classrooms').select('id, name').eq('id', cid).maybeSingle(),
+        const base = [
+          supabase.from('classrooms').select('id, name, center_id').eq('id', cid).maybeSingle(),
           supabase
             .from('enrollments')
             .select('id, status, students(id, name, dob)')
@@ -90,7 +171,28 @@ export function ClassroomDetail() {
             .eq('classroom_id', cid)
             .order('created_at', { ascending: false })
             .limit(20),
-        ]);
+        ];
+        // Directors can also enroll/assign, so load the pickable rosters.
+        const extra = isDirector
+          ? [
+              supabase
+                .from('students')
+                .select('id, name, center_id, dob, profile_picture_url')
+                .order('name'),
+              supabase.from('teachers').select('id, name, email, center_id').order('name'),
+              // Every enrollment across the center, to show each student's current rooms.
+              supabase.from('enrollments').select('student_id, classrooms(name)'),
+            ]
+          : [];
+        const [
+          classroomRes,
+          enrollmentsRes,
+          assignmentsRes,
+          entriesRes,
+          studentsRes,
+          teachersRes,
+          allEnrollmentsRes,
+        ] = await Promise.all([...base, ...extra]);
         if (!active) return;
         if (classroomRes.error) throw classroomRes.error;
         if (enrollmentsRes.error) throw enrollmentsRes.error;
@@ -100,6 +202,45 @@ export function ClassroomDetail() {
         setEnrollments((enrollmentsRes.data ?? []) as unknown as EnrollmentRow[]);
         setAssignments((assignmentsRes.data ?? []) as unknown as AssignmentRow[]);
         setEntries((entriesRes.data ?? []) as unknown as EntryRow[]);
+        if (studentsRes && !studentsRes.error) {
+          const studentRows = (studentsRes.data ?? []) as unknown as {
+            id: number;
+            name: string;
+            center_id: number;
+            dob: string | null;
+            profile_picture_url: string | null;
+          }[];
+          setAllStudents(studentRows);
+          const paths = studentRows
+            .map((s) => s.profile_picture_url)
+            .filter((p): p is string => Boolean(p));
+          if (paths.length) {
+            const map = await getStudentPhotoUrls(paths);
+            if (active) setPhotoByPath(map);
+          }
+        }
+        if (teachersRes && !teachersRes.error) {
+          setAllTeachers(
+            (teachersRes.data ?? []) as unknown as {
+              id: number;
+              name: string;
+              email: string;
+              center_id: number;
+            }[],
+          );
+        }
+        if (allEnrollmentsRes && !allEnrollmentsRes.error) {
+          const map: Record<number, string[]> = {};
+          for (const row of (allEnrollmentsRes.data ?? []) as unknown as {
+            student_id: number;
+            classrooms: { name: string } | null;
+          }[]) {
+            const roomName = row.classrooms?.name;
+            if (!roomName) continue;
+            (map[row.student_id] ??= []).push(roomName);
+          }
+          setStudentClassrooms(map);
+        }
       } catch (e) {
         if (active) setError(e instanceof Error ? e.message : 'Failed to load classroom.');
       } finally {
@@ -109,34 +250,196 @@ export function ClassroomDetail() {
     return () => {
       active = false;
     };
-  }, [cid]);
+  }, [cid, isDirector]);
+
+  const reloadRosters = async () => {
+    const [enr, asg] = await Promise.all([
+      supabase.from('enrollments').select('id, status, students(id, name, dob)').eq('classroom_id', cid),
+      supabase.from('teacher_assignments').select('id, teachers(id, name, email)').eq('classroom_id', cid),
+    ]);
+    if (enr.error || asg.error) {
+      setActionError('Saved, but the list could not refresh — reload the page to see the latest.');
+      return;
+    }
+    setActionError(null);
+    setEnrollments((enr.data ?? []) as unknown as EnrollmentRow[]);
+    setAssignments((asg.data ?? []) as unknown as AssignmentRow[]);
+  };
+
+  // upsert + ignoreDuplicates: good rows land even if another tab/session already
+  // added one of the picks (the new unique constraints make a plain insert all-or-nothing).
+  const addStudents = async (ids: number[]) => {
+    const { error: insErr } = await supabase
+      .from('enrollments')
+      .upsert(
+        ids.map((sid) => ({ student_id: sid, classroom_id: cid })),
+        { onConflict: 'student_id,classroom_id', ignoreDuplicates: true },
+      );
+    if (insErr) throw insErr;
+    await reloadRosters();
+  };
+
+  const addTeachers = async (ids: number[]) => {
+    const { error: insErr } = await supabase
+      .from('teacher_assignments')
+      .upsert(
+        ids.map((tid) => ({ teacher_id: tid, classroom_id: cid })),
+        { onConflict: 'teacher_id,classroom_id', ignoreDuplicates: true },
+      );
+    if (insErr) throw insErr;
+    await reloadRosters();
+  };
+
+  const removeEnrollment = async (enrollmentId: number) => {
+    setActionError(null);
+    const { error: delErr } = await supabase.from('enrollments').delete().eq('id', enrollmentId);
+    if (delErr) setActionError(delErr.message);
+    else await reloadRosters();
+  };
+
+  const removeAssignment = async (assignmentId: number) => {
+    setActionError(null);
+    const { error: delErr } = await supabase
+      .from('teacher_assignments')
+      .delete()
+      .eq('id', assignmentId);
+    if (delErr) setActionError(delErr.message);
+    else await reloadRosters();
+  };
+
+  const renameClassroom = async () => {
+    setRenameError(null);
+    if (!renameValue.trim()) {
+      setRenameError('Classroom name is required.');
+      return;
+    }
+    setRenaming(true);
+    const { data, error: updErr } = await supabase
+      .from('classrooms')
+      .update({ name: renameValue.trim() })
+      .eq('id', cid)
+      .select('id, name, center_id')
+      .maybeSingle();
+    if (updErr) {
+      setRenameError(updErr.message);
+      setRenaming(false);
+      return;
+    }
+    if (!data) {
+      setRenameError('You do not have permission to rename this classroom.');
+      setRenaming(false);
+      return;
+    }
+    setClassroom(data as unknown as ClassroomRow);
+    setRenaming(false);
+    setRenameOpen(false);
+  };
+
+  const deleteClassroom = async () => {
+    setDeleting(true);
+    setActionError(null);
+    try {
+      const { data, error: delErr } = await supabase
+        .from('classrooms')
+        .delete()
+        .eq('id', cid)
+        .select('id');
+      if (delErr) throw delErr;
+      if (!data || data.length === 0) {
+        throw new Error('You do not have permission to delete this classroom.');
+      }
+      navigate('/classrooms', { replace: true });
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Could not delete classroom.');
+      setDeleting(false);
+      setConfirmDelete(false);
+    }
+  };
 
   if (loading) return <Loading />;
   if (error) return <ErrorState message={error} />;
   if (!classroom) return <EmptyState title="Classroom not found" icon="🔍" />;
 
+  const enrolledIds = new Set(
+    enrollments.map((en) => en.students?.id).filter((x): x is number => x != null),
+  );
+  const assignedIds = new Set(
+    assignments.map((a) => a.teachers?.id).filter((x): x is number => x != null),
+  );
+  // Only offer students/teachers from THIS classroom's center (a director may own
+  // several centers; an RLS with_check would otherwise reject a cross-center pick).
+  const studentOptions: PickOption[] = allStudents
+    .filter((s) => s.center_id === classroom.center_id && !enrolledIds.has(s.id))
+    .map((s) => {
+      const age = ageYearsMonths(s.dob);
+      const rooms = studentClassrooms[s.id];
+      const roomText = rooms && rooms.length ? `In ${rooms.join(', ')}` : undefined;
+      return {
+        id: s.id,
+        label: s.name,
+        sublabel: [age, roomText].filter(Boolean).join(' · ') || undefined,
+        imageUrl: s.profile_picture_url ? photoByPath[s.profile_picture_url] ?? null : null,
+        showAvatar: true,
+      };
+    });
+  const teacherOptions: PickOption[] = allTeachers
+    .filter((t) => t.center_id === classroom.center_id && !assignedIds.has(t.id))
+    .map((t) => ({ id: t.id, label: t.name, sublabel: t.email }));
+
+  const headerActions = (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <Link to="/classrooms" style={{ fontSize: 14, fontWeight: 700, color: Brand.onSurfaceVariant }}>
+        ← Classrooms
+      </Link>
+      {isDirector ? (
+        <>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setRenameValue(classroom.name);
+              setRenameError(null);
+              setRenameOpen(true);
+            }}
+          >
+            Rename
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => setConfirmDelete(true)}
+            style={{ color: Brand.error, borderColor: Brand.error }}
+          >
+            Delete
+          </Button>
+        </>
+      ) : null}
+    </div>
+  );
+
   return (
     <div>
-      <PageHeader
-        title={classroom.name}
-        actions={
-          <Link
-            to="/classrooms"
-            style={{ fontSize: 14, fontWeight: 700, color: Brand.onSurfaceVariant }}
-          >
-            ← Classrooms
-          </Link>
-        }
-      />
+      <PageHeader title={classroom.name} actions={headerActions} />
+
+      {actionError ? (
+        <div style={{ marginBottom: 16 }}>
+          <ErrorState message={actionError} />
+        </div>
+      ) : null}
 
       <StatGrid>
         <Stat label="Students" value={enrollments.length} icon="🧒" accent={Brand.primary} />
         <Stat label="Teachers" value={assignments.length} icon="👩‍🏫" accent={Brand.tertiary} />
       </StatGrid>
 
-      <h2 style={{ fontSize: 17, fontWeight: 800, color: Brand.onSurface, margin: '28px 0 14px' }}>
-        Students
-      </h2>
+      <SectionHeader
+        title="Students"
+        action={
+          isDirector ? (
+            <Button variant="secondary" onClick={() => setPicker('student')}>
+              Add students
+            </Button>
+          ) : null
+        }
+      />
       {enrollments.length === 0 ? (
         <EmptyState title="No students enrolled" icon="🧒" />
       ) : (
@@ -144,9 +447,10 @@ export function ClassroomDetail() {
           <thead>
             <tr>
               <Th>Student</Th>
-              <Th align="right" width={120}>
+              <Th align="right" width={100}>
                 Age
               </Th>
+              {isDirector ? <Th align="right" width={150} /> : null}
             </tr>
           </thead>
           <tbody>
@@ -170,15 +474,36 @@ export function ClassroomDetail() {
                 <Td align="right" style={{ color: Brand.onSurfaceVariant }}>
                   {ageFromDob(en.students?.dob ?? null)}
                 </Td>
+                {isDirector ? (
+                  <Td align="right">
+                    <div style={{ display: 'flex', gap: 14, justifyContent: 'flex-end' }}>
+                      {en.students ? (
+                        <ActionLink onClick={() => navigate(`/students/${en.students!.id}/edit`)}>
+                          Edit
+                        </ActionLink>
+                      ) : null}
+                      <ActionLink tone="danger" onClick={() => removeEnrollment(en.id)}>
+                        Remove
+                      </ActionLink>
+                    </div>
+                  </Td>
+                ) : null}
               </tr>
             ))}
           </tbody>
         </Table>
       )}
 
-      <h2 style={{ fontSize: 17, fontWeight: 800, color: Brand.onSurface, margin: '28px 0 14px' }}>
-        Teachers
-      </h2>
+      <SectionHeader
+        title="Teachers"
+        action={
+          isDirector ? (
+            <Button variant="secondary" onClick={() => setPicker('teacher')}>
+              Assign teacher
+            </Button>
+          ) : null
+        }
+      />
       {assignments.length === 0 ? (
         <EmptyState title="No teachers assigned" icon="👩‍🏫" />
       ) : (
@@ -210,6 +535,18 @@ export function ClassroomDetail() {
                   {a.teachers?.email ?? ''}
                 </div>
               </div>
+              {isDirector ? (
+                <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+                  {a.teachers ? (
+                    <ActionLink onClick={() => navigate(`/teachers/${a.teachers!.id}/edit`)}>
+                      Edit
+                    </ActionLink>
+                  ) : null}
+                  <ActionLink tone="danger" onClick={() => removeAssignment(a.id)}>
+                    Remove
+                  </ActionLink>
+                </div>
+              ) : null}
             </div>
           ))}
         </Card>
@@ -251,6 +588,90 @@ export function ClassroomDetail() {
           })}
         </Card>
       )}
+
+      {picker === 'student' ? (
+        <MultiSelectModal
+          title={`Add students to ${classroom.name}`}
+          options={studentOptions}
+          confirmLabel={(n) => `Add ${n} student${n === 1 ? '' : 's'}`}
+          emptyText="Every student is already enrolled in this class."
+          onClose={() => setPicker(null)}
+          onConfirm={addStudents}
+        />
+      ) : null}
+
+      {picker === 'teacher' ? (
+        <MultiSelectModal
+          title={`Assign teachers to ${classroom.name}`}
+          options={teacherOptions}
+          confirmLabel={(n) => `Assign ${n} teacher${n === 1 ? '' : 's'}`}
+          emptyText="Every teacher is already assigned to this class."
+          onClose={() => setPicker(null)}
+          onConfirm={addTeachers}
+        />
+      ) : null}
+
+      {renameOpen ? (
+        <Modal title="Rename classroom" onClose={() => (renaming ? null : setRenameOpen(false))}>
+          {renameError ? (
+            <div style={{ marginBottom: 14 }}>
+              <ErrorState message={renameError} />
+            </div>
+          ) : null}
+          <Field label="Classroom name">
+            <TextInput value={renameValue} onChange={setRenameValue} autoFocus />
+          </Field>
+          <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 18 }}>
+            <Button variant="secondary" onClick={() => setRenameOpen(false)} disabled={renaming}>
+              Cancel
+            </Button>
+            <Button onClick={renameClassroom} disabled={renaming}>
+              {renaming ? <Spinner size={16} /> : 'Save'}
+            </Button>
+          </div>
+        </Modal>
+      ) : null}
+
+      {confirmDelete ? (
+        <Modal title="Delete classroom?" onClose={() => (deleting ? null : setConfirmDelete(false))}>
+          <p style={{ fontSize: 14, color: Brand.onSurfaceVariant, marginBottom: 18 }}>
+            This permanently removes <strong>{classroom.name}</strong> along with its{' '}
+            {enrollments.length} enrollment{enrollments.length === 1 ? '' : 's'},{' '}
+            {assignments.length} teacher assignment{assignments.length === 1 ? '' : 's'}, its lesson
+            schedule, and <strong>all journal entries logged in this room</strong>. Students,
+            teachers, and their other records are not deleted. This cannot be undone.
+          </p>
+          <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+            <Button variant="secondary" onClick={() => setConfirmDelete(false)} disabled={deleting}>
+              Cancel
+            </Button>
+            <Button
+              onClick={deleteClassroom}
+              disabled={deleting}
+              style={{ background: Brand.error, color: Brand.onError }}
+            >
+              {deleting ? <Spinner size={16} /> : 'Delete classroom'}
+            </Button>
+          </div>
+        </Modal>
+      ) : null}
+    </div>
+  );
+}
+
+function SectionHeader({ title, action }: { title: string; action: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 12,
+        margin: '28px 0 14px',
+      }}
+    >
+      <h2 style={{ fontSize: 17, fontWeight: 800, color: Brand.onSurface, margin: 0 }}>{title}</h2>
+      {action}
     </div>
   );
 }

@@ -85,6 +85,185 @@ export type Database = {
           },
         ]
       }
+      assessment_domains: {
+        Row: {
+          code: string | null
+          id: number
+          section_id: number
+          sort: number
+          title: string
+        }
+        Insert: {
+          code?: string | null
+          id?: never
+          section_id: number
+          sort?: number
+          title: string
+        }
+        Update: {
+          code?: string | null
+          id?: never
+          section_id?: number
+          sort?: number
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "assessment_domains_section_id_fkey"
+            columns: ["section_id"]
+            isOneToOne: false
+            referencedRelation: "assessment_sections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      assessment_frameworks: {
+        Row: {
+          code: string
+          country: string
+          description: string | null
+          id: number
+          max_age_months: number | null
+          min_age_months: number | null
+          name: string
+          scoring_model: string
+          sort: number
+        }
+        Insert: {
+          code: string
+          country?: string
+          description?: string | null
+          id?: never
+          max_age_months?: number | null
+          min_age_months?: number | null
+          name: string
+          scoring_model: string
+          sort?: number
+        }
+        Update: {
+          code?: string
+          country?: string
+          description?: string | null
+          id?: never
+          max_age_months?: number | null
+          min_age_months?: number | null
+          name?: string
+          scoring_model?: string
+          sort?: number
+        }
+        Relationships: []
+      }
+      assessment_item_levels: {
+        Row: {
+          descriptor: string
+          id: number
+          item_id: number
+          label: string | null
+          level: number
+        }
+        Insert: {
+          descriptor: string
+          id?: never
+          item_id: number
+          label?: string | null
+          level: number
+        }
+        Update: {
+          descriptor?: string
+          id?: never
+          item_id?: number
+          label?: string | null
+          level?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "assessment_item_levels_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "assessment_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      assessment_items: {
+        Row: {
+          code: string | null
+          description: string | null
+          domain_id: number
+          id: number
+          item_kind: string
+          sort: number
+          title: string
+        }
+        Insert: {
+          code?: string | null
+          description?: string | null
+          domain_id: number
+          id?: never
+          item_kind: string
+          sort?: number
+          title: string
+        }
+        Update: {
+          code?: string | null
+          description?: string | null
+          domain_id?: number
+          id?: never
+          item_kind?: string
+          sort?: number
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "assessment_items_domain_id_fkey"
+            columns: ["domain_id"]
+            isOneToOne: false
+            referencedRelation: "assessment_domains"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      assessment_sections: {
+        Row: {
+          code: string
+          framework_id: number
+          id: number
+          max_age_months: number | null
+          min_age_months: number | null
+          sort: number
+          subtitle: string | null
+          title: string
+        }
+        Insert: {
+          code: string
+          framework_id: number
+          id?: never
+          max_age_months?: number | null
+          min_age_months?: number | null
+          sort?: number
+          subtitle?: string | null
+          title: string
+        }
+        Update: {
+          code?: string
+          framework_id?: number
+          id?: never
+          max_age_months?: number | null
+          min_age_months?: number | null
+          sort?: number
+          subtitle?: string | null
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "assessment_sections_framework_id_fkey"
+            columns: ["framework_id"]
+            isOneToOne: false
+            referencedRelation: "assessment_frameworks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       blocked_users: {
         Row: {
           blocked_id: string
@@ -109,21 +288,42 @@ export type Database = {
       centers: {
         Row: {
           created_at: string
+          description: string | null
+          facebook: string | null
           id: number
+          instagram: string | null
+          logo_url: string | null
           name: string
           owner_id: string
+          slug: string | null
+          website: string | null
+          whatsapp: string | null
         }
         Insert: {
           created_at?: string
+          description?: string | null
+          facebook?: string | null
           id?: never
+          instagram?: string | null
+          logo_url?: string | null
           name: string
           owner_id: string
+          slug?: string | null
+          website?: string | null
+          whatsapp?: string | null
         }
         Update: {
           created_at?: string
+          description?: string | null
+          facebook?: string | null
           id?: never
+          instagram?: string | null
+          logo_url?: string | null
           name?: string
           owner_id?: string
+          slug?: string | null
+          website?: string | null
+          whatsapp?: string | null
         }
         Relationships: []
       }
@@ -327,6 +527,69 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      enrollment_applications: {
+        Row: {
+          center_id: number
+          child_dob: string | null
+          child_gender: string | null
+          child_name: string
+          created_at: string
+          id: number
+          note: string | null
+          parent_email: string | null
+          parent_name: string | null
+          parent_phone: string | null
+          reviewed_at: string | null
+          status: string
+          student_id: number | null
+        }
+        Insert: {
+          center_id: number
+          child_dob?: string | null
+          child_gender?: string | null
+          child_name: string
+          created_at?: string
+          id?: never
+          note?: string | null
+          parent_email?: string | null
+          parent_name?: string | null
+          parent_phone?: string | null
+          reviewed_at?: string | null
+          status?: string
+          student_id?: number | null
+        }
+        Update: {
+          center_id?: number
+          child_dob?: string | null
+          child_gender?: string | null
+          child_name?: string
+          created_at?: string
+          id?: never
+          note?: string | null
+          parent_email?: string | null
+          parent_name?: string | null
+          parent_phone?: string | null
+          reviewed_at?: string | null
+          status?: string
+          student_id?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "enrollment_applications_center_id_fkey"
+            columns: ["center_id"]
+            isOneToOne: false
+            referencedRelation: "centers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "enrollment_applications_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       enrollments: {
         Row: {
@@ -680,6 +943,129 @@ export type Database = {
           },
         ]
       }
+      student_assessment_results: {
+        Row: {
+          achieved: boolean | null
+          assessment_id: number
+          id: number
+          item_id: number
+          level: number | null
+          note: string | null
+          observed_on: string | null
+        }
+        Insert: {
+          achieved?: boolean | null
+          assessment_id: number
+          id?: never
+          item_id: number
+          level?: number | null
+          note?: string | null
+          observed_on?: string | null
+        }
+        Update: {
+          achieved?: boolean | null
+          assessment_id?: number
+          id?: never
+          item_id?: number
+          level?: number | null
+          note?: string | null
+          observed_on?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "student_assessment_results_assessment_id_fkey"
+            columns: ["assessment_id"]
+            isOneToOne: false
+            referencedRelation: "student_assessments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "student_assessment_results_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "assessment_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      student_assessments: {
+        Row: {
+          assessed_by: string | null
+          assessed_on: string
+          center_id: number
+          created_at: string
+          framework_id: number
+          id: number
+          notes: string | null
+          section_id: number | null
+          status: string
+          student_id: number
+          updated_at: string
+        }
+        Insert: {
+          assessed_by?: string | null
+          assessed_on?: string
+          center_id: number
+          created_at?: string
+          framework_id: number
+          id?: never
+          notes?: string | null
+          section_id?: number | null
+          status?: string
+          student_id: number
+          updated_at?: string
+        }
+        Update: {
+          assessed_by?: string | null
+          assessed_on?: string
+          center_id?: number
+          created_at?: string
+          framework_id?: number
+          id?: never
+          notes?: string | null
+          section_id?: number | null
+          status?: string
+          student_id?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "student_assessments_assessed_by_fkey"
+            columns: ["assessed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "student_assessments_center_id_fkey"
+            columns: ["center_id"]
+            isOneToOne: false
+            referencedRelation: "centers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "student_assessments_framework_id_fkey"
+            columns: ["framework_id"]
+            isOneToOne: false
+            referencedRelation: "assessment_frameworks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "student_assessments_section_id_fkey"
+            columns: ["section_id"]
+            isOneToOne: false
+            referencedRelation: "assessment_sections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "student_assessments_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       students: {
         Row: {
           center_id: number
@@ -819,6 +1205,10 @@ export type Database = {
         }
         Returns: number
       }
+      add_classroom: {
+        Args: { p_name: string }
+        Returns: number
+      }
       add_entries: {
         Args: {
           p_activity_ids?: number[]
@@ -862,7 +1252,13 @@ export type Database = {
         }
         Returns: number
       }
+      approve_enrollment_application: {
+        Args: { p_classroom_id?: number; p_id: number }
+        Returns: number
+      }
       block_user: { Args: { p_other: string }; Returns: undefined }
+      bulk_add_students: { Args: { p_rows: Json }; Returns: Json }
+      bulk_add_teachers: { Args: { p_rows: Json }; Returns: Json }
       conversation_header: {
         Args: { p_conversation_id: number }
         Returns: {
@@ -880,8 +1276,18 @@ export type Database = {
         }
         Returns: number
       }
+      create_my_center: {
+        Args: {
+          p_center_name: string
+          p_classroom_names: string[]
+          p_full_name?: string
+        }
+        Returns: number
+      }
       current_push_webhook_secret: { Args: never; Returns: string }
       delete_device_token: { Args: { p_token: string }; Returns: undefined }
+      delete_my_center: { Args: never; Returns: boolean }
+      get_center_public: { Args: { p_slug: string }; Returns: Json }
       is_user_blocked: { Args: { p_other: string }; Returns: boolean }
       list_blocked_users: {
         Args: never
@@ -932,6 +1338,10 @@ export type Database = {
         }[]
       }
       reconcile_my_role: { Args: never; Returns: string }
+      reject_enrollment_application: {
+        Args: { p_id: number }
+        Returns: undefined
+      }
       report_content: {
         Args: {
           p_conversation_id?: number
@@ -957,6 +1367,19 @@ export type Database = {
       set_my_classrooms: { Args: { p_names: string[] }; Returns: number }
       set_plan_order: { Args: { p_ids: number[] }; Returns: undefined }
       start_conversation: { Args: { p_other: string }; Returns: number }
+      submit_enrollment_application: {
+        Args: {
+          p_child_dob: string
+          p_child_gender: string
+          p_child_name: string
+          p_note: string
+          p_parent_email: string
+          p_parent_name: string
+          p_parent_phone: string
+          p_slug: string
+        }
+        Returns: undefined
+      }
       unblock_user: { Args: { p_other: string }; Returns: undefined }
       update_activity: {
         Args: {
@@ -966,6 +1389,20 @@ export type Database = {
           p_materials?: string[]
           p_skill_ids?: number[]
           p_title: string
+        }
+        Returns: undefined
+      }
+      update_center_settings: {
+        Args: {
+          p_center_id: number
+          p_description: string
+          p_facebook: string
+          p_instagram: string
+          p_logo_url: string
+          p_name: string
+          p_slug: string
+          p_website: string
+          p_whatsapp: string
         }
         Returns: undefined
       }
@@ -981,6 +1418,19 @@ export type Database = {
           p_guardians: Json
           p_id: number
           p_name: string
+          p_photo_url: string
+        }
+        Returns: number
+      }
+      update_teacher: {
+        Args: {
+          p_assignments: Json
+          p_dob: string
+          p_email: string
+          p_gender: string
+          p_id: number
+          p_name: string
+          p_phone: string
           p_photo_url: string
         }
         Returns: number

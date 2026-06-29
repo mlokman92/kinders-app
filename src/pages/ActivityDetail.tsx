@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 
 import {
   Badge,
@@ -8,8 +8,11 @@ import {
   EmptyState,
   ErrorState,
   Loading,
+  Modal,
   PageHeader,
+  Spinner,
 } from '@/components/ui';
+import { useAuth } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { Brand } from '@/lib/theme';
 
@@ -40,11 +43,16 @@ type SkillRow = {
 export function ActivityDetail() {
   const { id } = useParams();
   const aid = Number(id);
+  const navigate = useNavigate();
+  const { role } = useAuth();
 
   const [activity, setActivity] = useState<Activity | null>(null);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -90,23 +98,68 @@ export function ActivityDetail() {
     };
   }, [aid]);
 
+  const doDelete = async () => {
+    setDeleteError(null);
+    setDeleting(true);
+    const { error: delError } = await supabase.from('activities').delete().eq('id', aid);
+    if (delError) {
+      setDeleteError(delError.message);
+      setDeleting(false);
+      return;
+    }
+    navigate('/activities', { replace: true });
+  };
+
   if (loading) return <Loading />;
   if (error) return <ErrorState message={error} />;
   if (!activity) return <EmptyState title="Activity not found" icon="🔍" />;
 
   const materials = activity.materials ?? [];
   const instructions = activity.instructions ?? [];
+  const canManage = role === 'director';
 
   return (
     <div>
       <PageHeader
         title={activity.title}
         actions={
-          <Link to="/activities">
-            <Button variant="outline">← Back</Button>
-          </Link>
+          <>
+            {canManage ? (
+              <>
+                <Link to={`/activities/${aid}/edit`}>
+                  <Button variant="secondary">Edit</Button>
+                </Link>
+                <Button variant="outline" onClick={() => setConfirmDelete(true)}>
+                  Delete
+                </Button>
+              </>
+            ) : null}
+            <Link to="/activities">
+              <Button variant="outline">← Back</Button>
+            </Link>
+          </>
         }
       />
+
+      {confirmDelete ? (
+        <Modal title="Delete activity?" onClose={() => (deleting ? undefined : setConfirmDelete(false))}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {deleteError ? <ErrorState message={deleteError} /> : null}
+            <p style={{ fontSize: 14.5, color: Brand.onSurfaceVariant, lineHeight: 1.5 }}>
+              “{activity.title}” will be permanently removed. This also removes it from any weekly
+              plans and journal entries it was tagged on.
+            </p>
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+              <Button variant="secondary" onClick={() => setConfirmDelete(false)} disabled={deleting}>
+                Cancel
+              </Button>
+              <Button onClick={doDelete} disabled={deleting} style={{ background: Brand.error, color: Brand.onError }}>
+                {deleting ? <Spinner size={16} /> : 'Delete'}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
 
       {activity.description ? (
         <Card style={{ marginBottom: 16 }}>

@@ -1,27 +1,45 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 
 import {
   Avatar,
   Badge,
+  Button,
   Card,
   EmptyState,
   ErrorState,
   Loading,
+  Modal,
   PageHeader,
+  Spinner,
 } from '@/components/ui';
+import { AddContactModal } from '@/components/AddContactModal';
+import { NewAssessmentModal } from '@/components/NewAssessmentModal';
 import { ENTRY_EMOJI, entryLabel } from '@/constants/entry-actions';
+import { modelMeta } from '@/lib/assessments';
+import { useAuth } from '@/lib/auth';
 import { formatDisplayDate, parseISODate } from '@/lib/dates';
 import { humanizeEntry } from '@/lib/entries';
+import { getStudentPhotoUrl } from '@/lib/storage';
 import { supabase } from '@/lib/supabase';
 import { Brand } from '@/lib/theme';
 
 type Student = {
   id: number;
+  center_id: number;
   name: string;
   dob: string | null;
   gender: string | null;
+  profile_picture_url: string | null;
   created_at: string;
+};
+
+type AssessmentRow = {
+  id: number;
+  status: string;
+  assessed_on: string;
+  assessment_frameworks: { name: string; scoring_model: string } | null;
+  assessment_sections: { title: string } | null;
 };
 
 type EnrollmentRow = {
@@ -33,7 +51,7 @@ type EnrollmentRow = {
 
 type GuardianRow = {
   id: number;
-  name: string;
+  name: string | null;
   email: string | null;
   phone: string | null;
   relationship: string | null;
@@ -62,13 +80,34 @@ function ageFromDob(dob: string | null): number | null {
 export function StudentDetail() {
   const { id } = useParams();
   const sid = Number(id);
+  const navigate = useNavigate();
+  const { role } = useAuth();
 
   const [student, setStudent] = useState<Student | null>(null);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [enrollments, setEnrollments] = useState<EnrollmentRow[]>([]);
   const [guardians, setGuardians] = useState<GuardianRow[]>([]);
   const [entries, setEntries] = useState<EntryRow[]>([]);
+  const [assessments, setAssessments] = useState<AssessmentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [addContactOpen, setAddContactOpen] = useState(false);
+  const [newAssessOpen, setNewAssessOpen] = useState(false);
+
+  const reloadGuardians = async () => {
+    const { data } = await supabase
+      .from('guardians')
+      .select('id, name, email, phone, relationship')
+      .eq('student_id', sid);
+    setGuardians((data ?? []) as unknown as GuardianRow[]);
+  };
+
+  const isStaff = role === 'director' || role === 'teacher';
+  const isDirector = role === 'director';
 
   useEffect(() => {
     let active = true;
@@ -76,10 +115,10 @@ export function StudentDetail() {
       setLoading(true);
       setError(null);
       try {
-        const [studentRes, enrollRes, guardianRes, entriesRes] = await Promise.all([
+        const [studentRes, enrollRes, guardianRes, entriesRes, assessRes] = await Promise.all([
           supabase
             .from('students')
-            .select('id, name, dob, gender, created_at')
+            .select('id, center_id, name, dob, gender, profile_picture_url, created_at')
             .eq('id', sid)
             .maybeSingle(),
           supabase
@@ -97,16 +136,31 @@ export function StudentDetail() {
             .order('entry_date', { ascending: false })
             .order('created_at', { ascending: false })
             .limit(40),
+          supabase
+            .from('student_assessments')
+            .select(
+              'id, status, assessed_on, assessment_frameworks(name, scoring_model), assessment_sections(title)',
+            )
+            .eq('student_id', sid)
+            .order('assessed_on', { ascending: false })
+            .order('created_at', { ascending: false }),
         ]);
         if (!active) return;
         if (studentRes.error) throw studentRes.error;
         if (enrollRes.error) throw enrollRes.error;
         if (guardianRes.error) throw guardianRes.error;
         if (entriesRes.error) throw entriesRes.error;
-        setStudent((studentRes.data ?? null) as unknown as Student | null);
+        if (assessRes.error) throw assessRes.error;
+        const loadedStudent = (studentRes.data ?? null) as unknown as Student | null;
+        setStudent(loadedStudent);
         setEnrollments((enrollRes.data ?? []) as unknown as EnrollmentRow[]);
         setGuardians((guardianRes.data ?? []) as unknown as GuardianRow[]);
         setEntries((entriesRes.data ?? []) as unknown as EntryRow[]);
+        setAssessments((assessRes.data ?? []) as unknown as AssessmentRow[]);
+        if (loadedStudent?.profile_picture_url) {
+          const url = await getStudentPhotoUrl(loadedStudent.profile_picture_url);
+          if (active) setPhotoUrl(url);
+        }
       } catch (e) {
         if (active) setError(e instanceof Error ? e.message : 'Failed to load student.');
       } finally {
@@ -118,6 +172,27 @@ export function StudentDetail() {
     };
   }, [sid]);
 
+  const deleteStudent = async () => {
+    setDeleting(true);
+    setActionError(null);
+    try {
+      const { data, error: delError } = await supabase
+        .from('students')
+        .delete()
+        .eq('id', sid)
+        .select('id');
+      if (delError) throw delError;
+      if (!data || data.length === 0) {
+        throw new Error('You do not have permission to delete this student.');
+      }
+      navigate('/students', { replace: true });
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Could not delete student.');
+      setDeleting(false);
+      setConfirmOpen(false);
+    }
+  };
+
   const backLink = (
     <Link
       to="/students"
@@ -125,6 +200,26 @@ export function StudentDetail() {
     >
       ← Students
     </Link>
+  );
+
+  const headerActions = (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      {backLink}
+      {isStaff ? (
+        <Button variant="secondary" onClick={() => navigate(`/students/${sid}/edit`)}>
+          Edit
+        </Button>
+      ) : null}
+      {isDirector ? (
+        <Button
+          variant="outline"
+          onClick={() => setConfirmOpen(true)}
+          style={{ color: Brand.error, borderColor: Brand.error }}
+        >
+          Delete
+        </Button>
+      ) : null}
+    </div>
   );
 
   if (loading) {
@@ -169,10 +264,16 @@ export function StudentDetail() {
 
   return (
     <div>
-      <PageHeader title={student.name} actions={backLink} />
+      <PageHeader title={student.name} actions={headerActions} />
+
+      {actionError ? (
+        <div style={{ marginBottom: 16 }}>
+          <ErrorState message={actionError} />
+        </div>
+      ) : null}
 
       <Card style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-        <Avatar name={student.name} size={56} />
+        <Avatar name={student.name} size={56} src={photoUrl} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 19, fontWeight: 800, color: Brand.onSurface }}>{student.name}</div>
           <div style={{ fontSize: 13.5, color: Brand.onSurfaceVariant, marginTop: 3 }}>
@@ -195,9 +296,22 @@ export function StudentDetail() {
         </div>
       </Card>
 
-      <h2 style={{ fontSize: 17, fontWeight: 800, color: Brand.onSurface, margin: '28px 0 14px' }}>
-        Contacts
-      </h2>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          margin: '28px 0 14px',
+        }}
+      >
+        <h2 style={{ fontSize: 17, fontWeight: 800, color: Brand.onSurface, margin: 0 }}>Contacts</h2>
+        {isStaff ? (
+          <Button variant="secondary" onClick={() => setAddContactOpen(true)}>
+            Add contact
+          </Button>
+        ) : null}
+      </div>
       <Card padding={0}>
         {guardians.length === 0 ? (
           <div style={{ padding: '16px 18px', fontSize: 14, color: Brand.onSurfaceVariant }}>
@@ -215,7 +329,7 @@ export function StudentDetail() {
                 borderTop: i === 0 ? 'none' : `1px solid ${Brand.outlineVariant}`,
               }}
             >
-              <Avatar name={g.name} size={40} />
+              <Avatar name={g.name || g.email || g.phone || ''} size={40} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div
                   style={{
@@ -226,7 +340,7 @@ export function StudentDetail() {
                   }}
                 >
                   <span style={{ fontSize: 14.5, fontWeight: 700, color: Brand.onSurface }}>
-                    {g.name}
+                    {g.name || g.email || g.phone || 'Contact'}
                   </span>
                   {g.relationship ? <Badge tone="neutral">{g.relationship}</Badge> : null}
                 </div>
@@ -234,6 +348,63 @@ export function StudentDetail() {
                   {[g.email, g.phone].filter(Boolean).join(' · ') || 'No contact details'}
                 </div>
               </div>
+            </div>
+          ))
+        )}
+      </Card>
+
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          margin: '28px 0 14px',
+        }}
+      >
+        <h2 style={{ fontSize: 17, fontWeight: 800, color: Brand.onSurface, margin: 0 }}>
+          Assessments
+        </h2>
+        {isStaff ? (
+          <Button variant="secondary" onClick={() => setNewAssessOpen(true)}>
+            New assessment
+          </Button>
+        ) : null}
+      </div>
+      <Card padding={0}>
+        {assessments.length === 0 ? (
+          <div style={{ padding: '16px 18px', fontSize: 14, color: Brand.onSurfaceVariant }}>
+            No assessments yet
+          </div>
+        ) : (
+          assessments.map((a, i) => (
+            <div
+              key={a.id}
+              onClick={() => navigate(`/assessments/${a.id}`)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: '14px 18px',
+                cursor: 'pointer',
+                borderTop: i === 0 ? 'none' : `1px solid ${Brand.outlineVariant}`,
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14.5, fontWeight: 700, color: Brand.onSurface }}>
+                  {a.assessment_frameworks
+                    ? `${modelMeta(a.assessment_frameworks.scoring_model).icon} ${a.assessment_frameworks.name}`
+                    : 'Assessment'}
+                </div>
+                <div style={{ fontSize: 12.5, color: Brand.onSurfaceVariant, marginTop: 2 }}>
+                  {[a.assessment_sections?.title ?? 'All areas', formatDisplayDate(parseISODate(a.assessed_on))].join(
+                    ' · ',
+                  )}
+                </div>
+              </div>
+              <Badge tone={a.status === 'completed' ? 'success' : 'warning'}>
+                {a.status === 'completed' ? 'Completed' : 'Draft'}
+              </Badge>
             </div>
           ))
         )}
@@ -294,6 +465,50 @@ export function StudentDetail() {
           ))}
         </div>
       )}
+
+      {confirmOpen ? (
+        <Modal title="Delete student?" onClose={() => (deleting ? null : setConfirmOpen(false))}>
+          <p style={{ fontSize: 14, color: Brand.onSurfaceVariant, marginBottom: 18 }}>
+            This permanently removes <strong>{student.name}</strong>, their enrollments, contacts,
+            and journal entries. This cannot be undone.
+          </p>
+          <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+            <Button variant="secondary" onClick={() => setConfirmOpen(false)} disabled={deleting}>
+              Cancel
+            </Button>
+            <Button
+              onClick={deleteStudent}
+              disabled={deleting}
+              style={{ background: Brand.error, color: Brand.onError }}
+            >
+              {deleting ? <Spinner size={16} /> : 'Delete'}
+            </Button>
+          </div>
+        </Modal>
+      ) : null}
+
+      {addContactOpen ? (
+        <AddContactModal
+          studentId={sid}
+          studentName={student.name}
+          onClose={() => setAddContactOpen(false)}
+          onAdded={reloadGuardians}
+        />
+      ) : null}
+
+      {newAssessOpen ? (
+        <NewAssessmentModal
+          presetStudent={{
+            id: student.id,
+            name: student.name,
+            dob: student.dob,
+            center_id: student.center_id,
+            photoUrl,
+          }}
+          onClose={() => setNewAssessOpen(false)}
+          onCreated={(aid) => navigate(`/assessments/${aid}`)}
+        />
+      ) : null}
     </div>
   );
 }

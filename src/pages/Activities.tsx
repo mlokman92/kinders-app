@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 
 import {
   Badge,
+  Button,
   Card,
   EmptyState,
   ErrorState,
@@ -12,6 +13,7 @@ import {
   TextInput,
   Toolbar,
 } from '@/components/ui';
+import { useAuth } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { Brand } from '@/lib/theme';
 
@@ -25,6 +27,7 @@ type ActivityRow = {
 };
 
 export function Activities() {
+  const { role } = useAuth();
   const [activities, setActivities] = useState<ActivityRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -65,6 +68,13 @@ export function Activities() {
       <PageHeader
         title="Activities"
         subtitle={`${activities.length} reusable ${activities.length === 1 ? 'activity' : 'activities'} in your library.`}
+        actions={
+          role === 'director' ? (
+            <Link to="/activities/new">
+              <Button>+ New activity</Button>
+            </Link>
+          ) : undefined
+        }
       />
 
       {loading ? (
@@ -82,7 +92,13 @@ export function Activities() {
           {filtered.length === 0 ? (
             <EmptyState
               title="No activities"
-              message={search ? 'No activities match your search.' : 'Activities created in the app will appear here.'}
+              message={
+                search
+                  ? 'No activities match your search.'
+                  : role === 'director'
+                    ? 'Create your first activity with “+ New activity”.'
+                    : 'Activities created by your director will appear here.'
+              }
               icon="🎨"
             />
           ) : (

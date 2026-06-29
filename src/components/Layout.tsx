@@ -12,10 +12,14 @@ const NAV: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: '📊' },
   { to: '/reports', label: 'Reports', icon: '📈' },
   { to: '/students', label: 'Students', icon: '🧒' },
+  { to: '/contacts', label: 'Contacts', icon: '📇' },
   { to: '/classrooms', label: 'Classrooms', icon: '🏫' },
   { to: '/activities', label: 'Activities', icon: '🎨' },
   { to: '/plans', label: 'Lesson plans', icon: '🗓️' },
+  { to: '/assessments', label: 'Assessments', icon: '📝' },
+  { to: '/enrollments', label: 'Enrollments', icon: '📥', directorOnly: true },
   { to: '/teachers', label: 'Teachers', icon: '👩‍🏫', directorOnly: true },
+  { to: '/settings', label: 'Settings', icon: '⚙️', directorOnly: true },
 ];
 
 export function Layout() {
