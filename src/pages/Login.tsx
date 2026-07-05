@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Navigate } from 'react-router-dom';
 
-import logo from '@/assets/kinders_logo_transparent.png';
+import { AppStoreBadge, GooglePlayBadge } from '@/components/StoreBadges';
 import { Button, Spinner, TextInput } from '@/components/ui';
+import logo from '@/assets/kinders_logo_transparent.png';
 import { useAuth } from '@/lib/auth';
 import { Brand, Radius } from '@/lib/theme';
 
@@ -56,7 +57,7 @@ export function Login() {
       <div
         style={{
           width: '100%',
-          maxWidth: 400,
+          maxWidth: 420,
           background: Brand.white,
           border: `1px solid ${Brand.outlineVariant}`,
           borderRadius: Radius.xl,
@@ -65,11 +66,7 @@ export function Login() {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 22 }}>
-          <img
-            src={logo}
-            alt="Kinders"
-            style={{ width: 40, height: 40, objectFit: 'contain' }}
-          />
+          <img src={logo} alt="Kinders" style={{ width: 40, height: 40, objectFit: 'contain' }} />
           <div>
             <div style={{ fontWeight: 800, fontSize: 20, color: Brand.onSurface }}>Kinders</div>
             <div style={{ fontSize: 13, color: Brand.onSurfaceVariant }}>Director & teacher portal</div>
@@ -96,7 +93,7 @@ export function Login() {
             {error ? <ErrorLine text={error} /> : null}
             <div style={{ marginTop: 18 }}>
               <Button onClick={handleSendCode} disabled={busy} style={{ width: '100%' }}>
-                {busy ? <Spinner size={16} /> : 'Send code'}
+                {busy ? <Spinner size={16} /> : 'Continue'}
               </Button>
             </div>
           </>
@@ -140,6 +137,33 @@ export function Login() {
             </button>
           </>
         )}
+
+        {/* Divider */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '24px 0 18px' }}>
+          <div style={{ flex: 1, height: 1, background: Brand.outlineVariant }} />
+          <span style={{ fontSize: 12, fontWeight: 600, color: Brand.onSurfaceVariant }}>or</span>
+          <div style={{ flex: 1, height: 1, background: Brand.outlineVariant }} />
+        </div>
+
+        {/* Get the app */}
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: Brand.onSurface }}>Get the mobile app</div>
+          <div
+            style={{
+              fontSize: 12.5,
+              color: Brand.onSurfaceVariant,
+              marginTop: 4,
+              marginBottom: 14,
+              lineHeight: 1.5,
+            }}
+          >
+            Create your center or sign in on the go.
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 10 }}>
+            <AppStoreBadge height={46} />
+            <GooglePlayBadge height={46} />
+          </div>
+        </div>
       </div>
     </div>
   );

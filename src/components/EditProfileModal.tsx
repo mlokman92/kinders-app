@@ -84,7 +84,7 @@ export function EditProfileModal({ initial, onClose, onSaved }: Props) {
       const { error: rpcError } = await supabase.rpc('update_my_profile', {
         p_full_name: trimmedName,
         p_phone: phone.trim(),
-        p_dob: dob || null,
+        p_dob: (dob || null) as unknown as string,
         p_gender: gender || '',
         p_photo_url: photoPath,
       });
