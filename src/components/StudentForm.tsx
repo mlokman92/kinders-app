@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { useAuth } from '@/lib/auth';
+import { useBranch } from '@/lib/branch';
 import { toISODate } from '@/lib/dates';
 import { uploadStudentPhoto } from '@/lib/storage';
 import { supabase } from '@/lib/supabase';
@@ -52,6 +53,7 @@ export type StudentFormInitial = {
   name: string;
   dob: string; // YYYY-MM-DD or ''
   gender: Gender | '';
+  nric: string;
   photoPath: string | null; // existing storage path, kept unless replaced
   photoUrl: string | null; // signed URL for preview only
   enrollments: FormEnrollment[];
@@ -63,7 +65,10 @@ export type StudentSubmitPayload = {
   name: string;
   dob: string | null;
   gender: string;
+  nric: string | null;
   photoPath: string; // '' when none
+  /** Branch for the student (selected in the form or from the switcher); null = default. */
+  branchId: number | null;
   enrollments: { classroom_id: number; status: string; enrollment_date: string; days: string[] }[];
   guardians: {
     name: string | null;
@@ -80,6 +85,14 @@ type Props = {
   initialClassroomId?: number | null;
   /** Directors may set/move classrooms; teachers cannot (matches the RPC + RLS). */
   canEditEnrollments: boolean;
+  /**
+   * May edit contacts. When false the Contacts editor is hidden — update_student silently
+   * skips guardian writes without this capability, so showing it would lose edits. Defaults
+   * to true for the add flow (creating a student always seeds its contacts).
+   */
+  canManageGuardians?: boolean;
+  /** Show a Branch select on multi-branch centers (the New page passes true). */
+  allowBranchSelect?: boolean;
   /** Lowercased emails of contacts that are registered parents (name/phone read-only). */
   linkedEmails?: Set<string>;
   onSubmit: (payload: StudentSubmitPayload) => Promise<void>;
@@ -104,15 +117,29 @@ export function StudentForm({
   initial,
   initialClassroomId = null,
   canEditEnrollments,
+  canManageGuardians = true,
+  allowBranchSelect = false,
   linkedEmails,
   onSubmit,
   onCancel,
 }: Props) {
   const { user } = useAuth();
+  const { branches, branchId: contextBranchId } = useBranch();
+
+  const [formBranchId, setFormBranchId] = useState<number | null>(contextBranchId);
+  const branchId = allowBranchSelect ? formBranchId : contextBranchId;
+  const showBranchSelect = allowBranchSelect && branches.length > 1;
+
+  // Default the form's branch to the first one when the switcher is on "all".
+  useEffect(() => {
+    if (allowBranchSelect && formBranchId == null && branches.length > 0)
+      setFormBranchId(branches[0].id);
+  }, [allowBranchSelect, formBranchId, branches]);
 
   const [name, setName] = useState(initial?.name ?? '');
   const [dob, setDob] = useState(initial?.dob ?? '');
   const [gender, setGender] = useState<Gender | ''>(initial?.gender ?? '');
+  const [nric, setNric] = useState(initial?.nric ?? '');
   const [enrollments, setEnrollments] = useState<FormEnrollment[]>(
     initial?.enrollments?.length
       ? initial.enrollments
@@ -128,18 +155,20 @@ export function StudentForm({
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Classrooms are only needed when the user can edit enrollments.
+  // Classrooms are only needed when the user can edit enrollments; scoped to the branch.
   useEffect(() => {
     if (!canEditEnrollments) return;
     let active = true;
     (async () => {
-      const res = await supabase.from('classrooms').select('id, name').order('name');
+      let q = supabase.from('classrooms').select('id, name').order('name');
+      if (branchId !== null) q = q.eq('branch_id', branchId);
+      const res = await q;
       if (active && !res.error) setClassrooms((res.data ?? []) as { id: number; name: string }[]);
     })();
     return () => {
       active = false;
     };
-  }, [canEditEnrollments]);
+  }, [canEditEnrollments, branchId]);
 
   const previewUrl = useMemo(
     () => (newFile ? URL.createObjectURL(newFile) : initial?.photoUrl ?? null),
@@ -224,19 +253,25 @@ export function StudentForm({
         name: trimmedName,
         dob: dob || null,
         gender: gender || '',
+        nric: nric.trim() || null,
         photoPath: photoPath ?? '',
+        branchId,
         enrollments: cleanEnrollments.map((e) => ({
           classroom_id: e.classroomId as number,
           status: e.status,
           enrollment_date: e.date || toISODate(new Date()),
           days: e.days,
         })),
-        guardians: cleanContacts.map((c) => ({
-          name: c.name.trim() || null,
-          email: c.email.trim() || null,
-          phone: c.phone.trim() || null,
-          relationship: c.relationship || null,
-        })),
+        // Only submit guardian edits when allowed; update_student skips them otherwise, so
+        // sending them would falsely imply they were saved.
+        guardians: canManageGuardians
+          ? cleanContacts.map((c) => ({
+              name: c.name.trim() || null,
+              email: c.email.trim() || null,
+              phone: c.phone.trim() || null,
+              relationship: c.relationship || null,
+            }))
+          : [],
       };
 
       await onSubmit(payload);
@@ -312,6 +347,25 @@ export function StudentForm({
             />
           </Field>
         </div>
+
+        <Field label="NRIC">
+          <TextInput
+            value={nric}
+            onChange={(v) => setNric(v.replace(/\D/g, ''))}
+            inputMode="numeric"
+            placeholder="e.g. 200101141234"
+          />
+        </Field>
+
+        {showBranchSelect ? (
+          <Field label="Branch">
+            <Select
+              value={formBranchId != null ? String(formBranchId) : ''}
+              onChange={(v) => setFormBranchId(v ? Number(v) : null)}
+              options={branches.map((b) => ({ label: b.name, value: String(b.id) }))}
+            />
+          </Field>
+        ) : null}
       </Card>
 
       {/* Enrollment — directors only */}
@@ -403,7 +457,8 @@ export function StudentForm({
         </Card>
       ) : null}
 
-      {/* Contacts */}
+      {/* Contacts — hidden without manage_guardians (the RPC would silently drop edits) */}
+      {canManageGuardians ? (
       <Card style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div style={{ fontSize: 16, fontWeight: 800, color: Brand.onSurface }}>Contacts</div>
 
@@ -496,6 +551,7 @@ export function StudentForm({
           + Add contact
         </Button>
       </Card>
+      ) : null}
 
       {/* Actions */}
       <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>

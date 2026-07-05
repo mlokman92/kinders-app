@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom';
 
 import {
   Avatar,
+  Badge,
   Button,
   Card,
   ErrorState,
@@ -12,6 +13,7 @@ import {
   Spinner,
   Textarea,
   TextInput,
+  Toggle,
 } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { fileToLogoDataUrl } from '@/lib/image';
@@ -28,7 +30,21 @@ type CenterRow = {
   instagram: string | null;
   facebook: string | null;
   whatsapp: string | null;
+  enrollment_required_fields: string[] | null;
 };
+
+// The enrollment-form fields a center can require. Child name, parent name, and phone are
+// always required (locked); the rest are togglable. Keys mirror the DB config + public form.
+const ENROLL_FIELDS: { key: string; label: string; locked?: boolean }[] = [
+  { key: 'child_name', label: "Child's name", locked: true },
+  { key: 'child_nric', label: "Child's NRIC" },
+  { key: 'child_dob', label: 'Date of birth' },
+  { key: 'child_gender', label: 'Gender' },
+  { key: 'parent_name', label: 'Parent / guardian name', locked: true },
+  { key: 'parent_email', label: 'Email' },
+  { key: 'parent_phone', label: 'Phone', locked: true },
+  { key: 'note', label: 'Notes' },
+];
 
 const slugify = (s: string) =>
   s
@@ -37,7 +53,7 @@ const slugify = (s: string) =>
     .replace(/^-+|-+$/g, '');
 
 export function Settings() {
-  const { role, user } = useAuth();
+  const { isOwner, user } = useAuth();
 
   const [centerId, setCenterId] = useState<number | null>(null);
   const [name, setName] = useState('');
@@ -48,12 +64,14 @@ export function Settings() {
   const [instagram, setInstagram] = useState('');
   const [facebook, setFacebook] = useState('');
   const [whatsapp, setWhatsapp] = useState('');
+  const [requiredFields, setRequiredFields] = useState<string[]>([]);
 
   const [newLogo, setNewLogo] = useState<File | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [copied, setCopied] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -64,7 +82,9 @@ export function Settings() {
       try {
         const res = await supabase
           .from('centers')
-          .select('id, name, slug, logo_url, description, website, instagram, facebook, whatsapp')
+          .select(
+            'id, name, slug, logo_url, description, website, instagram, facebook, whatsapp, enrollment_required_fields',
+          )
           .eq('owner_id', user?.id ?? '')
           .order('id')
           .limit(1)
@@ -82,6 +102,9 @@ export function Settings() {
           setInstagram(c.instagram ?? '');
           setFacebook(c.facebook ?? '');
           setWhatsapp(c.whatsapp ?? '');
+          setRequiredFields(
+            Array.isArray(c.enrollment_required_fields) ? c.enrollment_required_fields : [],
+          );
         }
       } catch (e) {
         if (active) setError(e instanceof Error ? e.message : 'Failed to load settings.');
@@ -105,6 +128,21 @@ export function Settings() {
   }, [newLogo, previewLogo]);
 
   const publicUrl = `${window.location.origin}/enroll/${slugify(slug) || 'your-center'}`;
+
+  const toggleRequired = (key: string) =>
+    setRequiredFields((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
+    );
+
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(publicUrl);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard unavailable */
+    }
+  };
 
   const save = async () => {
     if (centerId == null) return;
@@ -135,6 +173,7 @@ export function Settings() {
         p_instagram: instagram,
         p_facebook: facebook,
         p_whatsapp: whatsapp,
+        p_enrollment_required_fields: requiredFields,
       });
       if (rpcError) throw rpcError;
       setLogoUrl(finalLogo);
@@ -149,7 +188,7 @@ export function Settings() {
     }
   };
 
-  if (role && role !== 'director') return <Navigate to="/" replace />;
+  if (!isOwner) return <Navigate to="/" replace />;
 
   return (
     <div>
@@ -209,9 +248,37 @@ export function Settings() {
             <Field label="Web address (slug)">
               <TextInput value={slug} onChange={setSlug} placeholder="your-center" />
             </Field>
-            <div style={{ fontSize: 12.5, color: Brand.onSurfaceVariant, marginTop: -8 }}>
-              Enrollment page:{' '}
-              <span style={{ fontWeight: 700, color: Brand.onPrimaryContainer }}>{publicUrl}</span>
+            <div style={{ marginTop: -8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <span style={{ fontSize: 12.5, color: Brand.onSurfaceVariant }}>Enrollment page</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <a
+                  href={publicUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    background: Brand.primaryContainer,
+                    color: Brand.onPrimaryContainer,
+                    fontWeight: 700,
+                    fontSize: 13.5,
+                    padding: '9px 14px',
+                    borderRadius: Radius.full,
+                    textDecoration: 'none',
+                    wordBreak: 'break-all',
+                  }}
+                >
+                  <span aria-hidden>🔗</span>
+                  <span>{publicUrl}</span>
+                  <span aria-hidden style={{ opacity: 0.6 }}>
+                    ↗
+                  </span>
+                </a>
+                <Button variant="secondary" onClick={copyLink}>
+                  {copied ? 'Copied' : 'Copy'}
+                </Button>
+              </div>
             </div>
 
             <Field label="Short description">
@@ -242,6 +309,52 @@ export function Settings() {
                 <TextInput value={facebook} onChange={setFacebook} placeholder="handle or URL" />
               </Field>
             </div>
+          </Card>
+
+          {/* Enrollment form — which fields families must fill in */}
+          <Card style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ fontSize: 16, fontWeight: 800, color: Brand.onSurface }}>Enrollment form</div>
+            <div style={{ fontSize: 12.5, color: Brand.onSurfaceVariant, marginTop: -6 }}>
+              Choose which fields families must fill in.
+            </div>
+            {ENROLL_FIELDS.map((f) => {
+              const on = requiredFields.includes(f.key);
+              return (
+                <div
+                  key={f.key}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                  }}
+                >
+                  <span style={{ fontSize: 14, color: Brand.onSurface }}>{f.label}</span>
+                  {f.locked ? (
+                    <Badge tone="primary">Always required</Badge>
+                  ) : (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span
+                        style={{
+                          fontSize: 12.5,
+                          fontWeight: 600,
+                          color: on ? Brand.onSurface : Brand.onSurfaceVariant,
+                          minWidth: 52,
+                          textAlign: 'right',
+                        }}
+                      >
+                        {on ? 'Required' : 'Optional'}
+                      </span>
+                      <Toggle
+                        checked={on}
+                        onChange={() => toggleRequired(f.key)}
+                        label={`${f.label} required`}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </Card>
 
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Navigate } from 'react-router-dom';
 
+import logo from '@/assets/kinders_logo_transparent.png';
 import { Button, Spinner, TextInput } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { Brand, Radius } from '@/lib/theme';
@@ -64,22 +65,11 @@ export function Login() {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 22 }}>
-          <div
-            style={{
-              width: 40,
-              height: 40,
-              borderRadius: Radius.md,
-              background: Brand.primary,
-              color: Brand.onPrimary,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontWeight: 800,
-              fontSize: 20,
-            }}
-          >
-            K
-          </div>
+          <img
+            src={logo}
+            alt="Kinders"
+            style={{ width: 40, height: 40, objectFit: 'contain' }}
+          />
           <div>
             <div style={{ fontWeight: 800, fontSize: 20, color: Brand.onSurface }}>Kinders</div>
             <div style={{ fontSize: 13, color: Brand.onSurfaceVariant }}>Director & teacher portal</div>

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 
 import {
   Badge,
@@ -21,6 +21,8 @@ import {
   DateInput,
 } from '@/components/ui';
 import { ENTRY_ACTIONS, ENTRY_EMOJI, entryLabel } from '@/constants/entry-actions';
+import { useAuth } from '@/lib/auth';
+import { useBranch } from '@/lib/branch';
 import { addDays, formatDisplayDate, parseISODate, toISODate } from '@/lib/dates';
 import { entryTimeLabel, humanizeEntry } from '@/lib/entries';
 import { downloadEntriesReportPdf } from '@/lib/entriesPdf';
@@ -43,6 +45,8 @@ type EntryRow = {
 };
 
 export function Reports() {
+  const { can } = useAuth();
+  const { branchId } = useBranch();
   const [classrooms, setClassrooms] = useState<ClassroomRow[]>([]);
   const [classroom, setClassroom] = useState('all');
   const [type, setType] = useState('all');
@@ -54,25 +58,29 @@ export function Reports() {
   const [error, setError] = useState<string | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
 
-  // Load classrooms for the filter once.
+  // Load classrooms for the filter, scoped to the selected branch.
   useEffect(() => {
     let active = true;
     (async () => {
-      const { data, error: err } = await supabase
-        .from('classrooms')
-        .select('id, name')
-        .order('name');
+      let q = supabase.from('classrooms').select('id, name').order('name');
+      if (branchId !== null) q = q.eq('branch_id', branchId);
+      const { data, error: err } = await q;
       if (!active) return;
       if (err) {
         setError(err.message);
         return;
       }
-      setClassrooms((data ?? []) as unknown as ClassroomRow[]);
+      const rows = (data ?? []) as unknown as ClassroomRow[];
+      setClassrooms(rows);
+      // Drop a classroom selection that fell out of the branch.
+      setClassroom((prev) =>
+        prev !== 'all' && !rows.some((c) => String(c.id) === prev) ? 'all' : prev,
+      );
     })();
     return () => {
       active = false;
     };
-  }, []);
+  }, [branchId]);
 
   // Refetch entries whenever the filters change.
   useEffect(() => {
@@ -91,7 +99,15 @@ export function Reports() {
           .order('entry_date', { ascending: false })
           .order('created_at', { ascending: false })
           .limit(2000);
-        if (classroom !== 'all') q = q.eq('classroom_id', Number(classroom));
+        if (classroom !== 'all') {
+          q = q.eq('classroom_id', Number(classroom));
+        } else if (branchId !== null) {
+          // No classroom filter: narrow to the branch's classrooms.
+          const clsRes = await supabase.from('classrooms').select('id').eq('branch_id', branchId);
+          if (clsRes.error) throw clsRes.error;
+          const ids = (clsRes.data ?? []).map((c) => c.id);
+          q = q.in('classroom_id', ids.length > 0 ? ids : [-1]);
+        }
         const { data, error: err } = await q;
         if (!active) return;
         if (err) throw err;
@@ -105,7 +121,7 @@ export function Reports() {
     return () => {
       active = false;
     };
-  }, [classroom, from, to]);
+  }, [classroom, from, to, branchId]);
 
   const classroomOptions = useMemo(
     () => [
@@ -243,6 +259,9 @@ export function Reports() {
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
   }, [entries]);
+
+  // Placed after all hooks so hook order stays stable.
+  if (!can('view_reports')) return <Navigate to="/" replace />;
 
   return (
     <div>

@@ -23,6 +23,7 @@ export const TEMPLATE_COLUMNS = [
   'name',
   'dob',
   'gender',
+  'nric',
   'classroom',
   'status',
   'enrollment_date',
@@ -146,6 +147,14 @@ const STATIC_ALIASES: Record<string, Field> = {
   born: 'dob',
   gender: 'gender',
   sex: 'gender',
+  nric: 'nric',
+  ic: 'nric',
+  'ic number': 'nric',
+  'ic no': 'nric',
+  'identity card': 'nric',
+  mykid: 'nric',
+  'birth certificate': 'nric',
+  'birth cert': 'nric',
   classroom: 'classroom',
   'classroom name': 'classroom',
   class: 'classroom',
@@ -216,6 +225,7 @@ export type PreviewRow = {
   name: string;
   dob: string | null;
   gender: string;
+  nric: string;
   classroomName: string;
   classroomId: number | null;
   status: string;
@@ -290,6 +300,9 @@ export function validateRows(
       if (GENDERS.includes(genderRaw)) gender = genderRaw;
       else errors.push(`Gender "${genderRaw}" must be male, female, or other.`);
     }
+
+    // nric — digits only; silently strip separators (dashes/spaces) so "200101-14-1234" works.
+    const nric = cellOf(raw, 'nric').replace(/\D/g, '');
 
     // classroom (optional; resolves a name to an id)
     const classroomName = cellOf(raw, 'classroom');
@@ -387,6 +400,7 @@ export function validateRows(
       name,
       dob,
       gender,
+      nric,
       classroomName,
       classroomId,
       status,
@@ -409,6 +423,7 @@ export type RpcStudentRow = {
   name: string;
   dob: string | null;
   gender: string;
+  nric: string;
   enrollments: EnrollmentInput[];
   guardians: GuardianInput[];
 };
@@ -430,6 +445,7 @@ export function toRpcPayload(rows: PreviewRow[]): RpcStudentRow[] {
     name: r.name,
     dob: r.dob,
     gender: r.gender,
+    nric: r.nric,
     enrollments:
       r.classroomId != null
         ? [
@@ -457,6 +473,7 @@ export function buildTemplateCsv(): string {
     'Aisha Rahman',
     '2021-03-14',
     'female',
+    '210314140087',
     'Sunflower',
     'active',
     '2026-01-06',

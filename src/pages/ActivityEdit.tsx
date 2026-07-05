@@ -15,7 +15,7 @@ export function ActivityEdit() {
   const { id } = useParams();
   const aid = Number(id);
   const navigate = useNavigate();
-  const { role } = useAuth();
+  const { can } = useAuth();
 
   const [initial, setInitial] = useState<ActivityFormInitial | null>(null);
   const [loading, setLoading] = useState(true);
@@ -67,8 +67,8 @@ export function ActivityEdit() {
     };
   }, [aid]);
 
-  // Only directors can edit activities (mirrors mobile + the RLS owner-only write).
-  if (role !== 'director') return <Navigate to={`/activities/${aid}`} replace />;
+  // Editing activities needs manage_activities — RLS enforces the same rule.
+  if (!can('manage_activities')) return <Navigate to={`/activities/${aid}`} replace />;
 
   const onSubmit = async (payload: ActivitySubmitPayload) => {
     const { error: rpcError } = await supabase.rpc('update_activity', {

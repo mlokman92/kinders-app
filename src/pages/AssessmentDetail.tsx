@@ -5,7 +5,6 @@ import {
   Badge,
   Button,
   Card,
-  Chip,
   DateInput,
   EmptyState,
   ErrorState,
@@ -24,6 +23,7 @@ import {
   type ResultValue,
   type SectionCatalog,
 } from '@/lib/assessments';
+import { useAuth } from '@/lib/auth';
 import { formatDisplayDate, parseISODate } from '@/lib/dates';
 import { supabase } from '@/lib/supabase';
 import { Brand, Radius } from '@/lib/theme';
@@ -43,11 +43,13 @@ type Header = {
 };
 
 const EMPTY: ResultValue = { achieved: null, level: null, observed_on: null, note: null };
-const isActive = (v?: ResultValue) => !!v && (v.level != null || v.achieved === true);
+const isActive = (v?: ResultValue) => !!v && (v.level != null || v.achieved != null);
 
 export function AssessmentDetail() {
   const { id } = useParams();
   const aid = Number(id);
+  const { can } = useAuth();
+  const canManage = can('manage_assessments');
 
   const [header, setHeader] = useState<Header | null>(null);
   const [catalog, setCatalog] = useState<SectionCatalog[]>([]);
@@ -126,6 +128,7 @@ export function AssessmentDetail() {
   );
 
   const patch = (itemId: number, p: Partial<ResultValue>) => {
+    if (!canManage) return;
     setValues((prev) => ({ ...prev, [itemId]: { ...EMPTY, ...prev[itemId], ...p } }));
     setDirty((prev) => new Set(prev).add(itemId));
     setSavedNote(null);
@@ -225,7 +228,7 @@ export function AssessmentDetail() {
     }
   };
 
-  const actionButtons = (
+  const actionButtons = canManage ? (
     <>
       <Button variant="secondary" onClick={save} disabled={saving || !hasChanges}>
         {saving ? <Spinner size={16} /> : hasChanges ? (dirty.size ? `Save (${dirty.size})` : 'Save') : 'Saved'}
@@ -240,7 +243,7 @@ export function AssessmentDetail() {
         </Button>
       )}
     </>
-  );
+  ) : null;
 
   return (
     <div>
@@ -282,16 +285,22 @@ export function AssessmentDetail() {
         <div style={{ fontSize: 13, fontWeight: 700, color: Brand.onSurface, marginBottom: 8 }}>
           Teacher's comment
         </div>
-        <Textarea
-          value={comment}
-          onChange={(t) => {
-            setComment(t);
-            setCommentDirty(true);
-            setSavedNote(null);
-          }}
-          placeholder="Overall comment for this child's assessment…"
-          rows={3}
-        />
+        {canManage ? (
+          <Textarea
+            value={comment}
+            onChange={(t) => {
+              setComment(t);
+              setCommentDirty(true);
+              setSavedNote(null);
+            }}
+            placeholder="Overall comment for this child's assessment…"
+            rows={3}
+          />
+        ) : (
+          <div style={{ fontSize: 14, color: Brand.onSurfaceVariant, lineHeight: 1.5 }}>
+            {comment || '—'}
+          </div>
+        )}
       </Card>
 
       {error ? <div style={{ marginTop: 16 }}><ErrorState message={error} /></div> : null}
@@ -355,19 +364,21 @@ export function AssessmentDetail() {
         ))}
       </div>
 
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'flex-end',
-          alignItems: 'center',
-          gap: 10,
-          marginTop: 28,
-          paddingTop: 16,
-          borderTop: `1px solid ${Brand.outlineVariant}`,
-        }}
-      >
-        {actionButtons}
-      </div>
+      {canManage ? (
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'flex-end',
+            alignItems: 'center',
+            gap: 10,
+            marginTop: 28,
+            paddingTop: 16,
+            borderTop: `1px solid ${Brand.outlineVariant}`,
+          }}
+        >
+          {actionButtons}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -391,13 +402,21 @@ function ItemRow({
   const isRubric = item.item_kind === 'standard';
   const isAlert = item.item_kind === 'alert';
   const active = isActive(v);
+  const bg =
+    v.level != null
+      ? Brand.primaryContainer + '22'
+      : v.achieved === true
+        ? Brand.successContainer + '55'
+        : v.achieved === false
+          ? Brand.errorContainer + '44'
+          : 'transparent';
 
   return (
     <div
       style={{
         padding: '14px 18px',
         borderTop: first ? 'none' : `1px solid ${Brand.outlineVariant}`,
-        background: active ? (isAlert ? Brand.errorContainer + '55' : Brand.primaryContainer + '33') : 'transparent',
+        background: bg,
       }}
     >
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
@@ -413,17 +432,28 @@ function ItemRow({
           ) : null}
         </div>
         {!isRubric ? (
-          <Chip
-            label={isAlert ? '⚑ Tanda hadir' : '✓ Ya'}
-            selected={v.achieved === true}
-            onClick={() =>
-              onChange(
-                v.achieved === true
-                  ? { achieved: null, observed_on: null }
-                  : { achieved: true, observed_on: isAlert ? null : v.observed_on ?? today },
-              )
-            }
-          />
+          <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+            <ChoiceButton
+              label="Ya"
+              tone="yes"
+              selected={v.achieved === true}
+              onClick={() =>
+                onChange(
+                  v.achieved === true
+                    ? { achieved: null, observed_on: null }
+                    : { achieved: true, observed_on: isAlert ? null : v.observed_on ?? today },
+                )
+              }
+            />
+            <ChoiceButton
+              label="Tidak"
+              tone="no"
+              selected={v.achieved === false}
+              onClick={() =>
+                onChange(v.achieved === false ? { achieved: null } : { achieved: false, observed_on: null })
+              }
+            />
+          </div>
         ) : null}
       </div>
 
@@ -477,10 +507,10 @@ function ItemRow({
         </div>
       ) : null}
 
-      {/* Observed date (checklist / milestone) + free note, shown once active */}
+      {/* Observed date (only when "Ya" for checklist / milestone) + free note */}
       {active ? (
         <div style={{ display: 'flex', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
-          {!isRubric && !isAlert ? (
+          {!isRubric && !isAlert && v.achieved === true ? (
             <DateInput
               value={v.observed_on ?? ''}
               onChange={(d) => onChange({ observed_on: d || null })}
@@ -496,5 +526,43 @@ function ItemRow({
         </div>
       ) : null}
     </div>
+  );
+}
+
+/* ---------------------------------------------------- Ya / Tidak choice pill */
+
+function ChoiceButton({
+  label,
+  tone,
+  selected,
+  onClick,
+}: {
+  label: string;
+  tone: 'yes' | 'no';
+  selected: boolean;
+  onClick: () => void;
+}) {
+  const palette =
+    tone === 'yes'
+      ? { bg: Brand.successContainer, fg: Brand.onSuccessContainer, border: Brand.success }
+      : { bg: Brand.errorContainer, fg: Brand.onErrorContainer, border: Brand.error };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        minWidth: 62,
+        border: `1px solid ${selected ? palette.border : Brand.outlineVariant}`,
+        background: selected ? palette.bg : Brand.white,
+        color: selected ? palette.fg : Brand.onSurfaceVariant,
+        borderRadius: Radius.full,
+        padding: '7px 16px',
+        fontSize: 13.5,
+        fontWeight: 700,
+        cursor: 'pointer',
+      }}
+    >
+      {label}
+    </button>
   );
 }

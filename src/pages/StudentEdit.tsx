@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 
 import {
   StudentForm,
@@ -24,7 +24,7 @@ export function StudentEdit() {
   const { id } = useParams();
   const sid = Number(id);
   const navigate = useNavigate();
-  const { role } = useAuth();
+  const { can } = useAuth();
 
   const [initial, setInitial] = useState<StudentFormInitial | null>(null);
   const [linkedEmails, setLinkedEmails] = useState<Set<string>>(new Set());
@@ -40,7 +40,7 @@ export function StudentEdit() {
         const [studentRes, enrollRes, guardianRes, linkedRes] = await Promise.all([
           supabase
             .from('students')
-            .select('id, name, dob, gender, profile_picture_url')
+            .select('id, name, dob, gender, nric, profile_picture_url')
             .eq('id', sid)
             .maybeSingle(),
           supabase
@@ -64,6 +64,7 @@ export function StudentEdit() {
           name: string;
           dob: string | null;
           gender: string | null;
+          nric: string | null;
           profile_picture_url: string | null;
         } | null;
         if (!student) {
@@ -97,6 +98,7 @@ export function StudentEdit() {
           name: student.name,
           dob: student.dob ?? '',
           gender: toGender(student.gender),
+          nric: student.nric ?? '',
           photoPath,
           photoUrl,
           enrollments,
@@ -122,6 +124,7 @@ export function StudentEdit() {
       p_name: payload.name,
       p_dob: payload.dob ?? (null as unknown as string),
       p_gender: payload.gender,
+      p_nric: payload.nric ?? '',
       p_photo_url: payload.photoPath,
       p_enrollments: payload.enrollments,
       p_guardians: payload.guardians,
@@ -139,6 +142,10 @@ export function StudentEdit() {
     </Link>
   );
 
+  // 'Edit student profiles' is the capability that gates this page; enrollments and contacts
+  // have their own gated surfaces. Without it update_student would silently drop profile edits.
+  if (!can('edit_students')) return <Navigate to={`/students/${sid}`} replace />;
+
   return (
     <div>
       <PageHeader title="Edit student" actions={backLink} />
@@ -152,7 +159,8 @@ export function StudentEdit() {
         <StudentForm
           submitLabel="Save changes"
           initial={initial}
-          canEditEnrollments={role === 'director'}
+          canEditEnrollments={can('manage_enrollments')}
+          canManageGuardians={can('manage_guardians')}
           linkedEmails={linkedEmails}
           onSubmit={onSubmit}
           onCancel={() => navigate(`/students/${sid}`)}

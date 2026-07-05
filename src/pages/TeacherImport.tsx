@@ -7,14 +7,17 @@ import {
   Card,
   EmptyState,
   ErrorState,
+  Field,
   Loading,
   PageHeader,
+  Select,
   Spinner,
   Table,
   Td,
   Th,
 } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
+import { useBranch } from '@/lib/branch';
 import type { Json } from '@/lib/database.types';
 import { supabase } from '@/lib/supabase';
 import {
@@ -36,9 +39,18 @@ type Step = 'upload' | 'preview' | 'result';
 
 export function TeacherImport() {
   const navigate = useNavigate();
-  const { role } = useAuth();
+  const { role, can } = useAuth();
+  const { branches, branchId } = useBranch();
 
   const [step, setStep] = useState<Step>('upload');
+  // Import destination branch, defaulting to the context branch once branches load.
+  const [importBranchId, setImportBranchId] = useState<number | null>(branchId);
+  const branchSeeded = useRef(false);
+  useEffect(() => {
+    if (branchSeeded.current || branches.length === 0) return;
+    branchSeeded.current = true;
+    setImportBranchId(branchId ?? branches[0].id);
+  }, [branches, branchId]);
   const [refLoading, setRefLoading] = useState(true);
   const [refError, setRefError] = useState<string | null>(null);
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
@@ -55,17 +67,21 @@ export function TeacherImport() {
 
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Load the center's classrooms (for name→id resolution) and roster (for dup detection).
+  // Load the destination branch's classrooms (for name→id resolution) and roster (for dup
+  // detection). Scoped to importBranchId so a room name shared across branches resolves to the
+  // branch we're importing into, never an arbitrary same-name room in another branch.
   const loadRefData = useCallback(async () => {
+    let clsQ = supabase.from('classrooms').select('id, name').order('name');
+    if (importBranchId !== null) clsQ = clsQ.eq('branch_id', importBranchId);
     const [clsRes, rosterRes] = await Promise.all([
-      supabase.from('classrooms').select('id, name').order('name'),
+      clsQ,
       supabase.from('teachers').select('email'),
     ]);
     if (clsRes.error) throw clsRes.error;
     if (rosterRes.error) throw rosterRes.error;
     setClassrooms((clsRes.data ?? []) as Classroom[]);
     setRoster((rosterRes.data ?? []) as unknown as RosterEntry[]);
-  }, []);
+  }, [importBranchId]);
 
   useEffect(() => {
     let active = true;
@@ -151,6 +167,7 @@ export function TeacherImport() {
       const payload = toRpcPayload(chosen);
       const { data, error } = await supabase.rpc('bulk_add_teachers', {
         p_rows: payload as unknown as Json,
+        p_branch_id: importBranchId ?? undefined,
       });
       if (error) throw error;
       setResult(data as unknown as BulkResult);
@@ -176,20 +193,32 @@ export function TeacherImport() {
   };
 
   const backLink = (
-    <Link to="/teachers" style={{ fontSize: 14, fontWeight: 700, color: Brand.onSurfaceVariant }}>
-      ← Teachers
+    <Link to="/staff" style={{ fontSize: 14, fontWeight: 700, color: Brand.onSurfaceVariant }}>
+      ← Staff
     </Link>
   );
 
   /* ----------------------------------------------------------- render */
 
-  // Director-only (bulk_add_teachers derives an owned center). Placed after all
-  // hooks so hook order stays stable across role resolution.
-  if (role && role !== 'director') return <Navigate to="/teachers" replace />;
+  // Capability-gated (RLS enforces server-side). Placed after all hooks so
+  // hook order stays stable across role resolution.
+  if (role && !can('manage_staff')) return <Navigate to="/staff" replace />;
 
   return (
     <div>
-      <PageHeader title="Import teachers" actions={backLink} />
+      <PageHeader title="Import staff" actions={backLink} />
+
+      {branches.length > 1 && step !== 'result' ? (
+        <div style={{ marginBottom: 16, maxWidth: 280 }}>
+          <Field label="Branch">
+            <Select
+              value={importBranchId != null ? String(importBranchId) : ''}
+              onChange={(v) => setImportBranchId(v ? Number(v) : null)}
+              options={branches.map((b) => ({ label: b.name, value: String(b.id) }))}
+            />
+          </Field>
+        </div>
+      ) : null}
 
       {refLoading ? (
         <Loading />
@@ -224,16 +253,12 @@ export function TeacherImport() {
               Choose a different file
             </Button>
             <Button onClick={runImport} disabled={importing || selectedCount === 0}>
-              {importing ? (
-                <Spinner size={16} />
-              ) : (
-                `Import ${selectedCount} teacher${selectedCount === 1 ? '' : 's'}`
-              )}
+              {importing ? <Spinner size={16} /> : `Import ${selectedCount} staff`}
             </Button>
           </div>
         </>
       ) : (
-        <ResultStep result={result} rows={rows} onDone={() => navigate('/teachers')} onAgain={reset} />
+        <ResultStep result={result} rows={rows} onDone={() => navigate('/staff')} onAgain={reset} />
       )}
     </div>
   );
@@ -255,9 +280,9 @@ function UploadStep({
   return (
     <Card style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 560 }}>
       <p style={{ fontSize: 14, color: Brand.onSurfaceVariant, margin: 0 }}>
-        Upload a CSV to add many teachers at once. Start from the template — only{' '}
+        Upload a CSV to add many staff at once. Start from the template — only{' '}
         <strong>name</strong> is required. Add a <strong>classroom</strong> column to assign each
-        teacher to one of your rooms.
+        person to one of your rooms.
       </p>
       <input
         ref={fileRef}
@@ -298,7 +323,7 @@ function PreviewTable({
         <tr>
           <Th width={44}> </Th>
           <Th width={56}>Row</Th>
-          <Th>Teacher</Th>
+          <Th>Name</Th>
           <Th>Classroom</Th>
           <Th>Issues</Th>
         </tr>
@@ -368,7 +393,7 @@ function PreviewTable({
 function friendlyError(msg: string | undefined): string {
   if (!msg) return 'Unknown error.';
   if (/duplicate key|teachers_center_lower_email_uniq/i.test(msg)) {
-    return 'A teacher with this email already exists.';
+    return 'A staff member with this email already exists.';
   }
   return msg;
 }
@@ -397,11 +422,11 @@ function ResultStep({
       {result && result.inserted > 0 ? (
         <Card style={{ borderColor: Brand.success, background: Brand.successContainer, marginBottom: 16 }}>
           <div style={{ fontWeight: 800, color: Brand.onSuccessContainer }}>
-            Imported {result.inserted} teacher{result.inserted === 1 ? '' : 's'}.
+            Imported {result.inserted} staff.
           </div>
         </Card>
       ) : (
-        <EmptyState title="Nothing imported" message="No teachers were added." icon="📭" />
+        <EmptyState title="Nothing imported" message="No staff were added." icon="📭" />
       )}
 
       {failed.length > 0 ? (

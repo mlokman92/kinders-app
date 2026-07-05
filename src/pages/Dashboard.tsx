@@ -13,6 +13,7 @@ import {
 } from '@/components/ui';
 import { ENTRY_EMOJI, entryLabel } from '@/constants/entry-actions';
 import { useAuth } from '@/lib/auth';
+import { useBranch } from '@/lib/branch';
 import { toISODate } from '@/lib/dates';
 import { humanizeEntry } from '@/lib/entries';
 import { supabase } from '@/lib/supabase';
@@ -37,7 +38,8 @@ type Counts = {
 };
 
 export function Dashboard() {
-  const { role } = useAuth();
+  const { can } = useAuth();
+  const { branchId } = useBranch();
   const [counts, setCounts] = useState<Counts | null>(null);
   const [recent, setRecent] = useState<RecentEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,16 +52,48 @@ export function Dashboard() {
       setError(null);
       const today = toISODate(new Date());
       try {
+        // Resolve the branch's classroom + staff ids first when a branch is selected.
+        let classroomIds: number[] = [];
+        let teacherIds: number[] = [];
+        if (branchId !== null) {
+          const [clsRes, staffRes] = await Promise.all([
+            supabase.from('classrooms').select('id').eq('branch_id', branchId),
+            supabase.from('staff_branches').select('teacher_id').eq('branch_id', branchId),
+          ]);
+          if (clsRes.error) throw clsRes.error;
+          if (staffRes.error) throw staffRes.error;
+          classroomIds = (clsRes.data ?? []).map((r) => r.id);
+          teacherIds = (staffRes.data ?? []).map((r) => r.teacher_id);
+          if (classroomIds.length === 0) classroomIds = [-1];
+          if (teacherIds.length === 0) teacherIds = [-1];
+        }
+
+        let studentsQ = supabase.from('students').select('id', { count: 'exact', head: true });
+        let classroomsQ = supabase.from('classrooms').select('id', { count: 'exact', head: true });
+        let teachersQ = supabase.from('teachers').select('id', { count: 'exact', head: true });
+        let entriesTodayQ = supabase
+          .from('entries')
+          .select('id', { count: 'exact', head: true })
+          .eq('entry_date', today);
+        let recentQ = supabase
+          .from('entries')
+          .select('id, type, entry_date, created_at, data, student_id, students(name), classrooms(name)')
+          .order('created_at', { ascending: false })
+          .limit(12);
+        if (branchId !== null) {
+          studentsQ = studentsQ.eq('branch_id', branchId);
+          classroomsQ = classroomsQ.eq('branch_id', branchId);
+          teachersQ = teachersQ.in('id', teacherIds);
+          entriesTodayQ = entriesTodayQ.in('classroom_id', classroomIds);
+          recentQ = recentQ.in('classroom_id', classroomIds);
+        }
+
         const [students, classrooms, teachers, entriesToday, recentRes] = await Promise.all([
-          supabase.from('students').select('id', { count: 'exact', head: true }),
-          supabase.from('classrooms').select('id', { count: 'exact', head: true }),
-          supabase.from('teachers').select('id', { count: 'exact', head: true }),
-          supabase.from('entries').select('id', { count: 'exact', head: true }).eq('entry_date', today),
-          supabase
-            .from('entries')
-            .select('id, type, entry_date, created_at, data, student_id, students(name), classrooms(name)')
-            .order('created_at', { ascending: false })
-            .limit(12),
+          studentsQ,
+          classroomsQ,
+          teachersQ,
+          entriesTodayQ,
+          recentQ,
         ]);
         if (!active) return;
         if (recentRes.error) throw recentRes.error;
@@ -79,7 +113,7 @@ export function Dashboard() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [branchId]);
 
   return (
     <div>
@@ -97,8 +131,8 @@ export function Dashboard() {
           <StatGrid>
             <Stat label="Students" value={counts?.students ?? 0} icon="🧒" accent={Brand.primary} />
             <Stat label="Classrooms" value={counts?.classrooms ?? 0} icon="🏫" accent={Brand.success} />
-            {role === 'director' ? (
-              <Stat label="Teachers" value={counts?.teachers ?? 0} icon="👩‍🏫" accent={Brand.tertiary} />
+            {can('manage_staff') ? (
+              <Stat label="Staff" value={counts?.teachers ?? 0} icon="👩‍🏫" accent={Brand.tertiary} />
             ) : null}
             <Stat
               label="Entries today"

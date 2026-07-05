@@ -14,6 +14,7 @@ import {
   Spinner,
 } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
+import { useBranch } from '@/lib/branch';
 import { formatDisplayDate, parseISODate } from '@/lib/dates';
 import { getStudentPhotoUrl } from '@/lib/storage';
 import { supabase } from '@/lib/supabase';
@@ -27,6 +28,8 @@ type Teacher = {
   dob: string | null;
   gender: string | null;
   profile_picture_url: string | null;
+  is_teacher: boolean;
+  is_admin: boolean;
   created_at: string;
 };
 
@@ -53,11 +56,13 @@ export function TeacherDetail() {
   const { id } = useParams();
   const tid = Number(id);
   const navigate = useNavigate();
-  const { role } = useAuth();
+  const { can, isOwner } = useAuth();
+  const { branches } = useBranch();
 
   const [teacher, setTeacher] = useState<Teacher | null>(null);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [branchIds, setBranchIds] = useState<number[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -65,7 +70,7 @@ export function TeacherDetail() {
   const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const isDirector = role === 'director';
+  const canManage = can('manage_staff');
 
   useEffect(() => {
     let active = true;
@@ -73,10 +78,12 @@ export function TeacherDetail() {
       setLoading(true);
       setError(null);
       try {
-        const [teacherRes, assignmentsRes] = await Promise.all([
+        const [teacherRes, assignmentsRes, branchRes] = await Promise.all([
           supabase
             .from('teachers')
-            .select('id, name, email, phone, dob, gender, profile_picture_url, created_at')
+            .select(
+              'id, name, email, phone, dob, gender, profile_picture_url, is_teacher, is_admin, created_at',
+            )
             .eq('id', tid)
             .maybeSingle(),
           supabase
@@ -84,19 +91,22 @@ export function TeacherDetail() {
             .select('id, status, days, classrooms(id, name)')
             .eq('teacher_id', tid)
             .order('id'),
+          supabase.from('staff_branches').select('branch_id').eq('teacher_id', tid),
         ]);
         if (!active) return;
         if (teacherRes.error) throw teacherRes.error;
         if (assignmentsRes.error) throw assignmentsRes.error;
+        if (branchRes.error) throw branchRes.error;
         const loaded = (teacherRes.data ?? null) as unknown as Teacher | null;
         setTeacher(loaded);
         setAssignments((assignmentsRes.data ?? []) as unknown as Assignment[]);
+        setBranchIds((branchRes.data ?? []).map((b) => b.branch_id));
         if (loaded?.profile_picture_url) {
           const url = await getStudentPhotoUrl(loaded.profile_picture_url);
           if (active) setPhotoUrl(url);
         }
       } catch (e) {
-        if (active) setError(e instanceof Error ? e.message : 'Failed to load teacher.');
+        if (active) setError(e instanceof Error ? e.message : 'Failed to load staff member.');
       } finally {
         if (active) setLoading(false);
       }
@@ -117,26 +127,26 @@ export function TeacherDetail() {
         .select('id');
       if (delError) throw delError;
       if (!data || data.length === 0) {
-        throw new Error('You do not have permission to delete this teacher.');
+        throw new Error('You do not have permission to delete this staff member.');
       }
-      navigate('/teachers', { replace: true });
+      navigate('/staff', { replace: true });
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : 'Could not delete teacher.');
+      setActionError(e instanceof Error ? e.message : 'Could not delete staff member.');
       setDeleting(false);
       setConfirmOpen(false);
     }
   };
 
   const backLink = (
-    <Link to="/teachers" style={{ fontSize: 14, fontWeight: 700, color: Brand.onSurfaceVariant }}>
-      ← Teachers
+    <Link to="/staff" style={{ fontSize: 14, fontWeight: 700, color: Brand.onSurfaceVariant }}>
+      ← Staff
     </Link>
   );
 
   if (loading) {
     return (
       <div>
-        <PageHeader title="Teacher" actions={backLink} />
+        <PageHeader title="Staff" actions={backLink} />
         <Loading />
       </div>
     );
@@ -145,7 +155,7 @@ export function TeacherDetail() {
   if (error) {
     return (
       <div>
-        <PageHeader title="Teacher" actions={backLink} />
+        <PageHeader title="Staff" actions={backLink} />
         <ErrorState message={error} />
       </div>
     );
@@ -154,28 +164,35 @@ export function TeacherDetail() {
   if (!teacher) {
     return (
       <div>
-        <PageHeader title="Teacher" actions={backLink} />
-        <EmptyState title="Teacher not found" icon="🔍" />
+        <PageHeader title="Staff" actions={backLink} />
+        <EmptyState title="Staff member not found" icon="🔍" />
       </div>
     );
   }
 
+  // Deleting an admin row is owner-only (DB-enforced); hide the button otherwise.
+  const canDelete = canManage && (isOwner || !teacher.is_admin);
+  const branchNames =
+    branches.length > 1
+      ? branches.filter((b) => branchIds.includes(b.id)).map((b) => b.name)
+      : [];
+
   const headerActions = (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
       {backLink}
-      {isDirector ? (
-        <>
-          <Button variant="secondary" onClick={() => navigate(`/teachers/${tid}/edit`)}>
-            Edit
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => setConfirmOpen(true)}
-            style={{ color: Brand.error, borderColor: Brand.error }}
-          >
-            Delete
-          </Button>
-        </>
+      {canManage ? (
+        <Button variant="secondary" onClick={() => navigate(`/staff/${tid}/edit`)}>
+          Edit
+        </Button>
+      ) : null}
+      {canDelete ? (
+        <Button
+          variant="outline"
+          onClick={() => setConfirmOpen(true)}
+          style={{ color: Brand.error, borderColor: Brand.error }}
+        >
+          Delete
+        </Button>
       ) : null}
     </div>
   );
@@ -197,14 +214,19 @@ export function TeacherDetail() {
           <div style={{ fontSize: 13.5, color: Brand.onSurfaceVariant, marginTop: 3 }}>
             {[teacher.email, teacher.phone].filter(Boolean).join(' · ') || 'No contact details'}
           </div>
-          {teacher.gender || teacher.dob ? (
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
-              {teacher.gender ? <Badge tone="neutral">{capitalize(teacher.gender)}</Badge> : null}
-              {teacher.dob ? (
-                <Badge tone="neutral">{formatDisplayDate(parseISODate(teacher.dob))}</Badge>
-              ) : null}
-            </div>
-          ) : null}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+            {teacher.is_teacher ? <Badge tone="primary">Teacher</Badge> : null}
+            {teacher.is_admin ? <Badge tone="warning">Admin</Badge> : null}
+            {branchNames.map((n) => (
+              <Badge key={n} tone="neutral">
+                {n}
+              </Badge>
+            ))}
+            {teacher.gender ? <Badge tone="neutral">{capitalize(teacher.gender)}</Badge> : null}
+            {teacher.dob ? (
+              <Badge tone="neutral">{formatDisplayDate(parseISODate(teacher.dob))}</Badge>
+            ) : null}
+          </div>
         </div>
       </Card>
 
@@ -255,7 +277,7 @@ export function TeacherDetail() {
       )}
 
       {confirmOpen ? (
-        <Modal title="Delete teacher?" onClose={() => (deleting ? null : setConfirmOpen(false))}>
+        <Modal title="Delete staff?" onClose={() => (deleting ? null : setConfirmOpen(false))}>
           <p style={{ fontSize: 14, color: Brand.onSurfaceVariant, marginBottom: 18 }}>
             This permanently removes <strong>{teacher.name}</strong> and their classroom assignments.
             They will lose staff access on their next sign-in. This cannot be undone.

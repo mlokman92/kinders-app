@@ -15,6 +15,7 @@ import {
   Th,
   Toolbar,
 } from '@/components/ui';
+import { useBranch } from '@/lib/branch';
 import { supabase } from '@/lib/supabase';
 import { Brand } from '@/lib/theme';
 
@@ -39,6 +40,7 @@ type Contact = {
 };
 
 export function Contacts() {
+  const { branchId } = useBranch();
   const [rows, setRows] = useState<GuardianRow[]>([]);
   const [linked, setLinked] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -52,10 +54,16 @@ export function Contacts() {
       setError(null);
       try {
         const [guardiansRes, linkedRes] = await Promise.all([
-          supabase
-            .from('guardians')
-            .select('id, name, email, phone, relationship, students(id, name)')
-            .order('name'),
+          branchId !== null
+            ? supabase
+                .from('guardians')
+                .select('id, name, email, phone, relationship, students!inner(id, name)')
+                .eq('students.branch_id', branchId)
+                .order('name')
+            : supabase
+                .from('guardians')
+                .select('id, name, email, phone, relationship, students(id, name)')
+                .order('name'),
           supabase.rpc('my_linked_guardian_emails'),
         ]);
         if (!active) return;
@@ -71,7 +79,7 @@ export function Contacts() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [branchId]);
 
   // Merge guardian rows into contacts: rows sharing an email are one person
   // (a parent of siblings); rows without an email stay separate.

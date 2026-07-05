@@ -12,6 +12,7 @@ import {
   type Framework,
   type Section,
 } from '@/lib/assessments';
+import { useBranch } from '@/lib/branch';
 import { getStudentPhotoUrls } from '@/lib/storage';
 import { supabase } from '@/lib/supabase';
 import { Brand, Radius } from '@/lib/theme';
@@ -59,6 +60,7 @@ export function NewAssessmentModal({
   onBulkCreated?: (count: number) => void;
 }) {
   const bulk = !presetStudent;
+  const { branchId } = useBranch();
 
   const [frameworks, setFrameworks] = useState<Framework[]>([]);
   const [exams, setExams] = useState<Exam[]>([]);
@@ -86,8 +88,10 @@ export function NewAssessmentModal({
         setFrameworks(fw);
         setExams(exs);
         if (bulk) {
+          let clsQuery = supabase.from('classrooms').select('id, name, center_id');
+          if (branchId != null) clsQuery = clsQuery.eq('branch_id', branchId);
           const [classRes, studRes] = await Promise.all([
-            supabase.from('classrooms').select('id, name, center_id').order('name'),
+            clsQuery.order('name'),
             supabase
               .from('students')
               .select('id, name, dob, center_id, profile_picture_url, enrollments(classroom_id)')
@@ -129,7 +133,7 @@ export function NewAssessmentModal({
     return () => {
       active = false;
     };
-  }, [bulk]);
+  }, [bulk, branchId]);
 
   const framework = frameworks.find((f) => String(f.id) === frameworkId) ?? null;
   const model = framework ? modelMeta(framework.scoring_model) : null;

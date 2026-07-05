@@ -44,7 +44,7 @@ export function ActivityDetail() {
   const { id } = useParams();
   const aid = Number(id);
   const navigate = useNavigate();
-  const { role } = useAuth();
+  const { can } = useAuth();
 
   const [activity, setActivity] = useState<Activity | null>(null);
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -116,7 +116,7 @@ export function ActivityDetail() {
 
   const materials = activity.materials ?? [];
   const instructions = activity.instructions ?? [];
-  const canManage = role === 'director';
+  const canManage = can('manage_activities');
 
   return (
     <div>

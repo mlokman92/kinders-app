@@ -412,10 +412,21 @@ const controlStyle: CSSProperties = {
   minWidth: 160,
 };
 
-export function Field({ label, children }: { label: string; children: ReactNode }) {
+export function Field({
+  label,
+  required,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  children: ReactNode;
+}) {
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <span style={{ fontSize: 12.5, fontWeight: 600, color: Brand.onSurfaceVariant }}>{label}</span>
+      <span style={{ fontSize: 12.5, fontWeight: 600, color: Brand.onSurfaceVariant }}>
+        {label}
+        {required ? <span style={{ color: Brand.error, marginLeft: 3 }}>*</span> : null}
+      </span>
       {children}
     </label>
   );
@@ -469,15 +480,19 @@ export function DateInput({
 export function TextInput({
   value,
   onChange,
+  onBlur,
   placeholder,
   type = 'text',
+  inputMode,
   style,
   autoFocus,
 }: {
   value: string;
   onChange: (value: string) => void;
+  onBlur?: () => void;
   placeholder?: string;
   type?: string;
+  inputMode?: 'text' | 'numeric' | 'tel' | 'decimal' | 'email' | 'search' | 'url' | 'none';
   style?: CSSProperties;
   autoFocus?: boolean;
 }) {
@@ -487,7 +502,9 @@ export function TextInput({
       value={value}
       autoFocus={autoFocus}
       placeholder={placeholder}
+      inputMode={inputMode}
       onChange={(e) => onChange(e.target.value)}
+      onBlur={onBlur}
       style={{ ...controlStyle, width: '100%', ...style }}
     />
   );
@@ -576,6 +593,55 @@ export function Chip({
       }}
     >
       {label}
+    </button>
+  );
+}
+
+/* ---------------------------------------------------------------- Toggle */
+
+/** An on/off switch. `checked` is the on state; `onChange` fires on click. */
+export function Toggle({
+  checked,
+  onChange,
+  label,
+}: {
+  checked: boolean;
+  onChange: () => void;
+  label?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={onChange}
+      style={{
+        width: 44,
+        height: 26,
+        flexShrink: 0,
+        borderRadius: Radius.full,
+        border: 'none',
+        padding: 0,
+        cursor: 'pointer',
+        position: 'relative',
+        background: checked ? Brand.primary : Brand.outlineVariant,
+        transition: 'background 0.15s',
+      }}
+    >
+      <span
+        style={{
+          position: 'absolute',
+          top: 3,
+          left: checked ? 21 : 3,
+          width: 20,
+          height: 20,
+          borderRadius: '50%',
+          background: Brand.white,
+          boxShadow: '0 1px 3px rgba(0, 0, 0, 0.25)',
+          transition: 'left 0.15s',
+        }}
+      />
     </button>
   );
 }

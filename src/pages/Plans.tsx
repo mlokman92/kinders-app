@@ -16,6 +16,8 @@ import {
   Spinner,
   Toolbar,
 } from '@/components/ui';
+import { useAuth } from '@/lib/auth';
+import { useBranch } from '@/lib/branch';
 import { addDays, formatDisplayDate, startOfWeekMonday, toISODate } from '@/lib/dates';
 import { supabase } from '@/lib/supabase';
 import { Brand, Radius } from '@/lib/theme';
@@ -77,6 +79,9 @@ function MiniButton({
 }
 
 export function Plans() {
+  const { can } = useAuth();
+  const { branchId } = useBranch();
+  const canManage = can('manage_plans');
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
   const [classroom, setClassroom] = useState('');
   const [view, setView] = useState<ViewMode>('month');
@@ -100,29 +105,31 @@ export function Plans() {
     return { gridStart, cellCount: weeks * 7 };
   }, [monthAnchor]);
 
-  // Load classrooms once.
+  // Load classrooms (scoped to the selected branch).
   useEffect(() => {
     let active = true;
     (async () => {
       setLoadingClassrooms(true);
-      const { data, error: err } = await supabase
-        .from('classrooms')
-        .select('id, name')
-        .order('name');
+      let query = supabase.from('classrooms').select('id, name').order('name');
+      if (branchId !== null) query = query.eq('branch_id', branchId);
+      const { data, error: err } = await query;
       if (!active) return;
       if (err) {
         setError(err.message);
       } else {
         const rows = (data ?? []) as unknown as Classroom[];
         setClassrooms(rows);
-        if (rows.length > 0) setClassroom(String(rows[0].id));
+        // Keep the selection when it survives the branch switch; else fall back.
+        setClassroom((prev) =>
+          rows.some((c) => String(c.id) === prev) ? prev : rows.length > 0 ? String(rows[0].id) : '',
+        );
       }
       setLoadingClassrooms(false);
     })();
     return () => {
       active = false;
     };
-  }, []);
+  }, [branchId]);
 
   // Load schedule items for the selected classroom + visible range.
   useEffect(() => {
@@ -278,7 +285,7 @@ export function Plans() {
               </Button>
             </div>
 
-            {view === 'week' ? (
+            {view === 'week' && canManage ? (
               <Button variant="secondary" onClick={() => setCopyOpen(true)} disabled={busy}>
                 Copy last week
               </Button>
@@ -353,31 +360,33 @@ export function Plans() {
                               >
                                 {idx + 1}. {it.activities?.title ?? 'Activity'}
                               </Link>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                                <MiniButton
-                                  title="Move up"
-                                  onClick={() => reorder(dayItems, idx, -1)}
-                                  disabled={idx === 0 || busy}
-                                >
-                                  ▲
-                                </MiniButton>
-                                <MiniButton
-                                  title="Move down"
-                                  onClick={() => reorder(dayItems, idx, 1)}
-                                  disabled={idx === dayItems.length - 1 || busy}
-                                >
-                                  ▼
-                                </MiniButton>
-                                <div style={{ flex: 1 }} />
-                                <MiniButton
-                                  title="Remove"
-                                  onClick={() => removeItem(it.id)}
-                                  disabled={busy}
-                                  danger
-                                >
-                                  ×
-                                </MiniButton>
-                              </div>
+                              {canManage ? (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                                  <MiniButton
+                                    title="Move up"
+                                    onClick={() => reorder(dayItems, idx, -1)}
+                                    disabled={idx === 0 || busy}
+                                  >
+                                    ▲
+                                  </MiniButton>
+                                  <MiniButton
+                                    title="Move down"
+                                    onClick={() => reorder(dayItems, idx, 1)}
+                                    disabled={idx === dayItems.length - 1 || busy}
+                                  >
+                                    ▼
+                                  </MiniButton>
+                                  <div style={{ flex: 1 }} />
+                                  <MiniButton
+                                    title="Remove"
+                                    onClick={() => removeItem(it.id)}
+                                    disabled={busy}
+                                    danger
+                                  >
+                                    ×
+                                  </MiniButton>
+                                </div>
+                              ) : null}
                             </div>
                           ))}
                         </div>
@@ -387,25 +396,27 @@ export function Plans() {
                         </div>
                       )}
 
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setAddCtx({ date: iso, label: `${label} ${formatDisplayDate(columnDate)}` })
-                        }
-                        style={{
-                          width: '100%',
-                          border: `1px dashed ${Brand.outline}`,
-                          background: 'transparent',
-                          color: Brand.onSurfaceVariant,
-                          borderRadius: Radius.md,
-                          padding: '8px 10px',
-                          fontSize: 13,
-                          fontWeight: 700,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        + Add
-                      </button>
+                      {canManage ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setAddCtx({ date: iso, label: `${label} ${formatDisplayDate(columnDate)}` })
+                          }
+                          style={{
+                            width: '100%',
+                            border: `1px dashed ${Brand.outline}`,
+                            background: 'transparent',
+                            color: Brand.onSurfaceVariant,
+                            borderRadius: Radius.md,
+                            padding: '8px 10px',
+                            fontSize: 13,
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          + Add
+                        </button>
+                      ) : null}
                     </Card>
                   );
                 })}

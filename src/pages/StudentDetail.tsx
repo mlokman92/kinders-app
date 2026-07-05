@@ -31,6 +31,7 @@ type Student = {
   name: string;
   dob: string | null;
   gender: string | null;
+  nric: string | null;
   profile_picture_url: string | null;
   created_at: string;
 };
@@ -83,7 +84,7 @@ export function StudentDetail() {
   const { id } = useParams();
   const sid = Number(id);
   const navigate = useNavigate();
-  const { role } = useAuth();
+  const { isStaff, can } = useAuth();
 
   const [student, setStudent] = useState<Student | null>(null);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
@@ -111,9 +112,6 @@ export function StudentDetail() {
     setGuardians((data ?? []) as unknown as GuardianRow[]);
   };
 
-  const isStaff = role === 'director' || role === 'teacher';
-  const isDirector = role === 'director';
-
   useEffect(() => {
     let active = true;
     (async () => {
@@ -123,7 +121,7 @@ export function StudentDetail() {
         const [studentRes, enrollRes, guardianRes, entriesRes, assessRes] = await Promise.all([
           supabase
             .from('students')
-            .select('id, center_id, name, dob, gender, profile_picture_url, created_at')
+            .select('id, center_id, name, dob, gender, nric, profile_picture_url, created_at')
             .eq('id', sid)
             .maybeSingle(),
           supabase
@@ -247,12 +245,12 @@ export function StudentDetail() {
           {pdfBusy ? <Spinner size={16} /> : 'Journal PDF'}
         </Button>
       ) : null}
-      {isStaff ? (
+      {can('edit_students') ? (
         <Button variant="secondary" onClick={() => navigate(`/students/${sid}/edit`)}>
           Edit
         </Button>
       ) : null}
-      {isDirector ? (
+      {can('manage_students') ? (
         <Button
           variant="outline"
           onClick={() => setConfirmOpen(true)}
@@ -322,6 +320,7 @@ export function StudentDetail() {
             {[
               age != null ? `${age} ${age === 1 ? 'year' : 'years'} old` : null,
               student.gender || null,
+              student.nric ? `NRIC ${student.nric}` : null,
             ]
               .filter(Boolean)
               .join(' · ') || 'No details on file'}
@@ -348,7 +347,7 @@ export function StudentDetail() {
         }}
       >
         <h2 style={{ fontSize: 17, fontWeight: 800, color: Brand.onSurface, margin: 0 }}>Contacts</h2>
-        {isStaff ? (
+        {can('manage_guardians') ? (
           <Button variant="secondary" onClick={() => setAddContactOpen(true)}>
             Add contact
           </Button>

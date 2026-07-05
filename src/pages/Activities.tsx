@@ -27,7 +27,8 @@ type ActivityRow = {
 };
 
 export function Activities() {
-  const { role } = useAuth();
+  const { can } = useAuth();
+  const canManage = can('manage_activities');
   const [activities, setActivities] = useState<ActivityRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -69,7 +70,7 @@ export function Activities() {
         title="Activities"
         subtitle={`${activities.length} reusable ${activities.length === 1 ? 'activity' : 'activities'} in your library.`}
         actions={
-          role === 'director' ? (
+          canManage ? (
             <Link to="/activities/new">
               <Button>+ New activity</Button>
             </Link>
@@ -95,7 +96,7 @@ export function Activities() {
               message={
                 search
                   ? 'No activities match your search.'
-                  : role === 'director'
+                  : canManage
                     ? 'Create your first activity with “+ New activity”.'
                     : 'Activities created by your director will appear here.'
               }

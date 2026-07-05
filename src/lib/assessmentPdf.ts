@@ -32,8 +32,9 @@ function resultText(item: ItemWithLevels, v: ResultRow): string {
     const label = lvl?.label ?? `TP${v.level}`;
     return clean(label + (lvl?.descriptor ? `\n${lvl.descriptor}` : ''));
   }
-  if (item.item_kind === 'alert') return v.achieved ? 'Ditanda / Flagged' : '';
-  return v.achieved ? 'Ya / Yes' : '';
+  if (v.achieved === true) return 'Ya / Yes';
+  if (v.achieved === false) return 'Tidak / No';
+  return '';
 }
 
 /** Fetch an assessment and download it as a PDF report. */
@@ -79,7 +80,7 @@ export async function downloadAssessmentPdf(assessmentId: number): Promise<void>
       for (const item of d.items) {
         total += 1;
         const v = results.get(item.id);
-        const active = !!v && (v.level != null || v.achieved === true);
+        const active = !!v && (v.level != null || v.achieved != null);
         if (!v || (!active && !(v.note && v.note.trim()))) continue;
         recorded += 1;
         body.push([
@@ -117,7 +118,9 @@ export async function downloadAssessmentPdf(assessmentId: number): Promise<void>
     ['Penilaian / Framework', clean(head.assessment_frameworks?.name) + (meta ? ` (${meta.label})` : '')],
   ];
   if (head.exams?.name) {
-    info.push(['Peperiksaan / Exam', clean(head.exams.name) + (head.exams.year ? ` ${head.exams.year}` : '')]);
+    const examName = clean(head.exams.name);
+    const yr = head.exams.year ? String(head.exams.year) : '';
+    info.push(['Peperiksaan / Exam', yr && !examName.includes(yr) ? `${examName} ${yr}` : examName]);
   }
   info.push(['Bahagian / Section', clean(head.assessment_sections?.title) || 'Semua bidang / All areas']);
   info.push(['Tarikh / Date', formatDisplayDate(parseISODate(head.assessed_on))]);
@@ -144,11 +147,14 @@ export async function downloadAssessmentPdf(assessmentId: number): Promise<void>
     y += lines.length * 13 + 10;
   }
 
+  // Reserve room at the bottom of every page for the signature block so the
+  // table never fills a page right down to the edge.
+  const SIGN_RESERVE = 64;
   autoTable(doc, {
     startY: y,
     head: [['Bidang / Domain', 'Perkara / Item', 'Keputusan / Result', 'Tarikh', 'Catatan / Note']],
     body: body.length ? body : [['', 'No items recorded / Tiada item direkod', '', '', '']],
-    margin: { left: margin, right: margin },
+    margin: { left: margin, right: margin, bottom: SIGN_RESERVE },
     styles: { fontSize: 8, cellPadding: 3, valign: 'top', overflow: 'linebreak' },
     headStyles: { fillColor: [0, 204, 203], textColor: [0, 50, 47], fontStyle: 'bold' },
     columnStyles: {
@@ -160,12 +166,10 @@ export async function downloadAssessmentPdf(assessmentId: number): Promise<void>
     },
   });
 
-  // Signature block at the bottom (new page if there's no room).
-  let sy = ((doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY ?? y) + 56;
-  if (sy > pageH - 70) {
-    doc.addPage();
-    sy = 90;
-  }
+  // Anchor the signatures to the bottom of the page the table ended on. The
+  // reserved bottom margin guarantees the table never reaches here, so the
+  // block always fits on the last page instead of spilling onto its own page.
+  const sy = pageH - 44;
   const colW = (pageW - margin * 2 - 40) / 2;
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');

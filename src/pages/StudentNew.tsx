@@ -8,19 +8,21 @@ import { Brand } from '@/lib/theme';
 
 export function StudentNew() {
   const navigate = useNavigate();
-  const { role } = useAuth();
+  const { can } = useAuth();
   const [params] = useSearchParams();
   const classroomId = params.get('classroom');
 
-  // Only directors can add students (add_student derives an owned center).
-  if (role !== 'director') return <Navigate to="/students" replace />;
+  // Adding students needs the manage_students capability (RLS enforces the same).
+  if (!can('manage_students')) return <Navigate to="/students" replace />;
 
   const onSubmit = async (payload: StudentSubmitPayload) => {
     const { data, error } = await supabase.rpc('add_student', {
       p_name: payload.name,
       p_dob: payload.dob ?? (null as unknown as string),
       p_gender: payload.gender,
+      p_nric: payload.nric ?? '',
       p_photo_url: payload.photoPath,
+      p_branch_id: payload.branchId ?? undefined,
       p_enrollments: payload.enrollments,
       p_guardians: payload.guardians,
     });
@@ -40,6 +42,7 @@ export function StudentNew() {
       <StudentForm
         submitLabel="Add student"
         canEditEnrollments
+        allowBranchSelect
         initialClassroomId={classroomId ? Number(classroomId) : null}
         onSubmit={onSubmit}
         onCancel={() => navigate('/students')}

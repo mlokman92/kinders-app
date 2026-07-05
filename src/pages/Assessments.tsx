@@ -24,6 +24,7 @@ import {
 import { modelMeta } from '@/lib/assessments';
 import { downloadAssessmentPdf } from '@/lib/assessmentPdf';
 import { useAuth } from '@/lib/auth';
+import { useBranch } from '@/lib/branch';
 import { formatDisplayDate, parseISODate } from '@/lib/dates';
 import { supabase } from '@/lib/supabase';
 import { Brand, Radius } from '@/lib/theme';
@@ -37,6 +38,7 @@ type Row = {
   status: string;
   assessed_on: string;
   created_at: string;
+  exam_id: number | null;
   students: { id: number; name: string; enrollments: { classrooms: Classroom | null }[] } | null;
   assessment_frameworks: { name: string; scoring_model: string } | null;
   assessment_sections: { title: string } | null;
@@ -93,7 +95,8 @@ function PagerButton({
 
 export function Assessments() {
   const navigate = useNavigate();
-  const { role } = useAuth();
+  const { can } = useAuth();
+  const { branchId } = useBranch();
   const currentYear = String(new Date().getFullYear());
 
   const [rows, setRows] = useState<Row[]>([]);
@@ -116,11 +119,18 @@ export function Assessments() {
     setLoading(true);
     setError(null);
     try {
-      const res = await supabase
+      let query = supabase
         .from('student_assessments')
         .select(
-          'id, status, assessed_on, created_at, students(id, name, enrollments(classrooms(id, name))), assessment_frameworks(name, scoring_model), assessment_sections(title), exams(name)',
-        )
+          'id, status, assessed_on, created_at, exam_id, students(id, name, enrollments(classrooms(id, name))), assessment_frameworks(name, scoring_model), assessment_sections(title), exams(name)',
+        );
+      if (branchId != null) {
+        const ids = await supabase.from('students').select('id').eq('branch_id', branchId);
+        if (ids.error) throw ids.error;
+        const studentIds = (ids.data ?? []).map((s) => s.id);
+        query = query.in('student_id', studentIds.length ? studentIds : [-1]);
+      }
+      const res = await query
         .order('assessed_on', { ascending: false })
         .order('created_at', { ascending: false });
       if (res.error) throw res.error;
@@ -134,12 +144,11 @@ export function Assessments() {
 
   useEffect(() => {
     load();
-    supabase
-      .from('classrooms')
-      .select('id, name')
-      .order('name')
-      .then(({ data }) => setClassrooms((data ?? []) as Classroom[]));
-  }, []);
+    let cls = supabase.from('classrooms').select('id, name');
+    if (branchId != null) cls = cls.eq('branch_id', branchId);
+    cls.order('name').then(({ data }) => setClassrooms((data ?? []) as Classroom[]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [branchId]);
 
   // Reset to the first page whenever a filter changes.
   useEffect(() => {
@@ -162,10 +171,11 @@ export function Assessments() {
     () => Array.from(new Set(rows.map((r) => r.assessment_frameworks?.name).filter(Boolean))) as string[],
     [rows],
   );
-  const examNames = useMemo(
-    () => Array.from(new Set(rows.map((r) => r.exams?.name).filter(Boolean))) as string[],
-    [rows],
-  );
+  const examOptions = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const r of rows) if (r.exam_id != null) map.set(r.exam_id, r.exams?.name ?? `Exam ${r.exam_id}`);
+    return Array.from(map, ([id, name]) => ({ value: String(id), label: name }));
+  }, [rows]);
   const years = useMemo(() => {
     const set = new Set<string>(rows.map((r) => r.assessed_on?.slice(0, 4)).filter(Boolean) as string[]);
     set.add(currentYear);
@@ -177,7 +187,7 @@ export function Assessments() {
     const cls = classroom ? Number(classroom) : null;
     return rows.filter((r) => {
       if (framework && r.assessment_frameworks?.name !== framework) return false;
-      if (examFilter && r.exams?.name !== examFilter) return false;
+      if (examFilter && String(r.exam_id ?? '') !== examFilter) return false;
       if (year && r.assessed_on?.slice(0, 4) !== year) return false;
       if (cls != null) {
         const ids = (r.students?.enrollments ?? [])
@@ -208,12 +218,14 @@ export function Assessments() {
         subtitle="Track each child's development against the Malaysia early-childhood standards."
         actions={
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            {role === 'director' ? (
+            {can('manage_exams') ? (
               <Button variant="secondary" onClick={() => setShowManage(true)}>
                 Manage exams
               </Button>
             ) : null}
-            <Button onClick={() => setShowNew(true)}>+ New assessment</Button>
+            {can('manage_assessments') ? (
+              <Button onClick={() => setShowNew(true)}>+ New assessment</Button>
+            ) : null}
           </div>
         }
       />
@@ -269,15 +281,12 @@ export function Assessments() {
                 ]}
               />
             </Field>
-            {examNames.length > 0 ? (
+            {examOptions.length > 0 ? (
               <Field label="Exam">
                 <Select
                   value={examFilter}
                   onChange={setExamFilter}
-                  options={[
-                    { value: '', label: 'All exams' },
-                    ...examNames.map((n) => ({ value: n, label: n })),
-                  ]}
+                  options={[{ value: '', label: 'All exams' }, ...examOptions]}
                 />
               </Field>
             ) : null}

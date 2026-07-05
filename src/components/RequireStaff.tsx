@@ -6,10 +6,10 @@ import { Button, Loading } from './ui';
 
 /**
  * Gate the authenticated area. The web dashboard is staff-only:
- *  - no session            -> /login
- *  - session, role pending -> "ask your center" notice
- *  - session, role parent  -> "use the mobile app" notice
- *  - director / teacher     -> render children
+ *  - no session                  -> /login
+ *  - session, role pending       -> "ask your center" notice
+ *  - session, role parent        -> "use the mobile app" notice
+ *  - director / admin / teacher  -> render children
  */
 export function RequireStaff({ children }: { children: React.ReactNode }) {
   const { initializing, session, role, isStaff, signOut } = useAuth();
@@ -31,8 +31,8 @@ export function RequireStaff({ children }: { children: React.ReactNode }) {
         title={parent ? 'Use the Kinders mobile app' : 'Your account isn’t set up yet'}
         message={
           parent
-            ? 'The web dashboard is for directors and teachers. Parents can view journals and message staff from the Kinders app on your phone.'
-            : 'This email isn’t recognised by any center yet. Ask your center director to add you as a teacher, then sign in again.'
+            ? 'The web dashboard is for center staff. Parents can view journals and message staff from the Kinders app on your phone.'
+            : 'This email isn’t recognised by any center yet. Ask your center director to add you as staff, then sign in again.'
         }
         onSignOut={signOut}
       />

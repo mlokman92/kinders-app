@@ -7,14 +7,17 @@ import {
   Card,
   EmptyState,
   ErrorState,
+  Field,
   Loading,
   PageHeader,
+  Select,
   Spinner,
   Table,
   Td,
   Th,
 } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
+import { useBranch } from '@/lib/branch';
 import {
   buildTemplateCsv,
   downloadCsv,
@@ -36,7 +39,12 @@ type Step = 'upload' | 'preview' | 'result';
 
 export function StudentImport() {
   const navigate = useNavigate();
-  const { role } = useAuth();
+  const { role, can } = useAuth();
+  const { branches, branchId } = useBranch();
+
+  // Branch for the imported rows: the switcher's branch, else a choice made here.
+  const [chosenBranchId, setChosenBranchId] = useState<number | null>(null);
+  const importBranchId = branchId ?? chosenBranchId ?? branches[0]?.id ?? null;
 
   const [step, setStep] = useState<Step>('upload');
   const [refLoading, setRefLoading] = useState(true);
@@ -55,17 +63,22 @@ export function StudentImport() {
 
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Load the center's classrooms (for name→id resolution) and roster (for dup detection).
+  // Load the branch's classrooms (for name→id resolution) and roster (for dup detection).
   useEffect(() => {
     let active = true;
     (async () => {
       setRefLoading(true);
       setRefError(null);
       try {
-        const [clsRes, rosterRes] = await Promise.all([
-          supabase.from('classrooms').select('id, name').order('name'),
-          supabase.from('students').select('name, dob'),
-        ]);
+        let clsQ = supabase.from('classrooms').select('id, name').order('name');
+        // Scope dup detection to the destination branch: a same-name+dob child in
+        // another branch is a distinct record and must not deselect a valid row.
+        let rosterQ = supabase.from('students').select('name, dob');
+        if (importBranchId !== null) {
+          clsQ = clsQ.eq('branch_id', importBranchId);
+          rosterQ = rosterQ.eq('branch_id', importBranchId);
+        }
+        const [clsRes, rosterRes] = await Promise.all([clsQ, rosterQ]);
         if (!active) return;
         if (clsRes.error) throw clsRes.error;
         if (rosterRes.error) throw rosterRes.error;
@@ -80,7 +93,7 @@ export function StudentImport() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [importBranchId]);
 
   const onFile = async (file: File) => {
     setParseError(null);
@@ -148,6 +161,7 @@ export function StudentImport() {
       const payload = toRpcPayload(chosen);
       const { data, error } = await supabase.rpc('bulk_add_students', {
         p_rows: payload as unknown as Json,
+        p_branch_id: importBranchId ?? undefined,
       });
       if (error) throw error;
       setResult(data as unknown as BulkResult);
@@ -178,9 +192,9 @@ export function StudentImport() {
 
   /* ----------------------------------------------------------- render */
 
-  // Director-only (bulk_add_students derives an owned center). Placed after all
+  // Needs the manage_students capability (RLS enforces the same). Placed after all
   // hooks so hook order stays stable across role resolution.
-  if (role && role !== 'director') return <Navigate to="/students" replace />;
+  if (role && !can('manage_students')) return <Navigate to="/students" replace />;
 
   return (
     <div>
@@ -191,12 +205,26 @@ export function StudentImport() {
       ) : refError ? (
         <ErrorState message={refError} />
       ) : step === 'upload' ? (
-        <UploadStep
-          fileRef={fileRef}
-          parseError={parseError}
-          onFile={onFile}
-          onTemplate={() => downloadCsv('kinders-students-template.csv', buildTemplateCsv())}
-        />
+        <>
+          {branchId === null && branches.length > 1 ? (
+            <div style={{ maxWidth: 280, marginBottom: 16 }}>
+              <Field label="Branch">
+                <Select
+                  value={importBranchId != null ? String(importBranchId) : ''}
+                  onChange={(v) => setChosenBranchId(v ? Number(v) : null)}
+                  options={branches.map((b) => ({ label: b.name, value: String(b.id) }))}
+                  style={{ width: '100%' }}
+                />
+              </Field>
+            </div>
+          ) : null}
+          <UploadStep
+            fileRef={fileRef}
+            parseError={parseError}
+            onFile={onFile}
+            onTemplate={() => downloadCsv('kinders-students-template.csv', buildTemplateCsv())}
+          />
+        </>
       ) : step === 'preview' ? (
         <>
           {importError ? (
@@ -323,7 +351,7 @@ function PreviewTable({
               <Td>
                 <div style={{ fontWeight: 700 }}>{r.name || '—'}</div>
                 <div style={{ fontSize: 12, color: Brand.onSurfaceVariant }}>
-                  {[r.dob, r.gender].filter(Boolean).join(' · ') || ' '}
+                  {[r.dob, r.gender, r.nric ? `NRIC ${r.nric}` : null].filter(Boolean).join(' · ') || ' '}
                 </div>
               </Td>
               <Td style={{ color: r.classroomName ? Brand.onSurface : Brand.onSurfaceVariant }}>

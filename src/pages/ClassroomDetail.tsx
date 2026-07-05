@@ -13,6 +13,7 @@ import {
   Loading,
   Modal,
   PageHeader,
+  Select,
   Spinner,
   Stat,
   StatGrid,
@@ -22,6 +23,7 @@ import {
   Th,
 } from '@/components/ui';
 import { ENTRY_EMOJI, entryLabel } from '@/constants/entry-actions';
+import { classroomAgeLabel } from '@/lib/age';
 import { useAuth } from '@/lib/auth';
 import { parseISODate } from '@/lib/dates';
 import { humanizeEntry } from '@/lib/entries';
@@ -29,7 +31,21 @@ import { getStudentPhotoUrls } from '@/lib/storage';
 import { supabase } from '@/lib/supabase';
 import { Brand } from '@/lib/theme';
 
-type ClassroomRow = { id: number; name: string; center_id: number };
+type ClassroomRow = {
+  id: number;
+  name: string;
+  center_id: number;
+  branch_id: number;
+  level_id: number | null;
+};
+
+type LevelRow = {
+  id: number;
+  center_id: number;
+  name: string;
+  min_age_months: number | null;
+  max_age_months: number | null;
+};
 
 type EnrollmentRow = {
   id: number;
@@ -114,8 +130,10 @@ export function ClassroomDetail() {
   const { id } = useParams();
   const cid = Number(id);
   const navigate = useNavigate();
-  const { role } = useAuth();
-  const isDirector = role === 'director';
+  const { can } = useAuth();
+  const canManageRooms = can('manage_classrooms');
+  const canEnroll = can('manage_enrollments');
+  const canStaff = can('manage_staff');
 
   const [classroom, setClassroom] = useState<ClassroomRow | null>(null);
   const [enrollments, setEnrollments] = useState<EnrollmentRow[]>([]);
@@ -126,6 +144,7 @@ export function ClassroomDetail() {
       id: number;
       name: string;
       center_id: number;
+      branch_id: number;
       dob: string | null;
       profile_picture_url: string | null;
     }[]
@@ -136,15 +155,22 @@ export function ClassroomDetail() {
   const [allTeachers, setAllTeachers] = useState<
     { id: number; name: string; email: string; center_id: number }[]
   >([]);
+  // teacher id ↔ branch membership, to keep the assign picker within this room's branch.
+  const [staffBranchRows, setStaffBranchRows] = useState<
+    { teacher_id: number; branch_id: number }[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [picker, setPicker] = useState<'student' | 'teacher' | null>(null);
 
-  const [renameOpen, setRenameOpen] = useState(false);
-  const [renameValue, setRenameValue] = useState('');
-  const [renaming, setRenaming] = useState(false);
-  const [renameError, setRenameError] = useState<string | null>(null);
+  const [levels, setLevels] = useState<LevelRow[]>([]);
+
+  const [editOpen, setEditOpen] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editLevelId, setEditLevelId] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -156,7 +182,11 @@ export function ClassroomDetail() {
       setError(null);
       try {
         const base = [
-          supabase.from('classrooms').select('id, name, center_id').eq('id', cid).maybeSingle(),
+          supabase
+            .from('classrooms')
+            .select('id, name, center_id, branch_id, level_id')
+            .eq('id', cid)
+            .maybeSingle(),
           supabase
             .from('enrollments')
             .select('id, status, students(id, name, dob)')
@@ -171,27 +201,36 @@ export function ClassroomDetail() {
             .eq('classroom_id', cid)
             .order('created_at', { ascending: false })
             .limit(20),
+          supabase
+            .from('levels')
+            .select('id, center_id, name, min_age_months, max_age_months')
+            .order('sort_order')
+            .order('id'),
         ];
-        // Directors can also enroll/assign, so load the pickable rosters.
-        const extra = isDirector
-          ? [
-              supabase
-                .from('students')
-                .select('id, name, center_id, dob, profile_picture_url')
-                .order('name'),
-              supabase.from('teachers').select('id, name, email, center_id').order('name'),
-              // Every enrollment across the center, to show each student's current rooms.
-              supabase.from('enrollments').select('student_id, classrooms(name)'),
-            ]
-          : [];
+        // Staff who can enroll/assign also need the pickable rosters.
+        const extra =
+          canEnroll || canStaff
+            ? [
+                supabase
+                  .from('students')
+                  .select('id, name, center_id, branch_id, dob, profile_picture_url')
+                  .order('name'),
+                supabase.from('teachers').select('id, name, email, center_id').order('name'),
+                // Every enrollment across the center, to show each student's current rooms.
+                supabase.from('enrollments').select('student_id, classrooms(name)'),
+                supabase.from('staff_branches').select('teacher_id, branch_id'),
+              ]
+            : [];
         const [
           classroomRes,
           enrollmentsRes,
           assignmentsRes,
           entriesRes,
+          levelsRes,
           studentsRes,
           teachersRes,
           allEnrollmentsRes,
+          staffBranchesRes,
         ] = await Promise.all([...base, ...extra]);
         if (!active) return;
         if (classroomRes.error) throw classroomRes.error;
@@ -199,6 +238,9 @@ export function ClassroomDetail() {
         if (assignmentsRes.error) throw assignmentsRes.error;
         if (entriesRes.error) throw entriesRes.error;
         setClassroom((classroomRes.data ?? null) as unknown as ClassroomRow | null);
+        if (levelsRes && !levelsRes.error) {
+          setLevels((levelsRes.data ?? []) as unknown as LevelRow[]);
+        }
         setEnrollments((enrollmentsRes.data ?? []) as unknown as EnrollmentRow[]);
         setAssignments((assignmentsRes.data ?? []) as unknown as AssignmentRow[]);
         setEntries((entriesRes.data ?? []) as unknown as EntryRow[]);
@@ -207,6 +249,7 @@ export function ClassroomDetail() {
             id: number;
             name: string;
             center_id: number;
+            branch_id: number;
             dob: string | null;
             profile_picture_url: string | null;
           }[];
@@ -241,6 +284,11 @@ export function ClassroomDetail() {
           }
           setStudentClassrooms(map);
         }
+        if (staffBranchesRes && !staffBranchesRes.error) {
+          setStaffBranchRows(
+            (staffBranchesRes.data ?? []) as unknown as { teacher_id: number; branch_id: number }[],
+          );
+        }
       } catch (e) {
         if (active) setError(e instanceof Error ? e.message : 'Failed to load classroom.');
       } finally {
@@ -250,7 +298,7 @@ export function ClassroomDetail() {
     return () => {
       active = false;
     };
-  }, [cid, isDirector]);
+  }, [cid, canEnroll, canStaff]);
 
   const reloadRosters = async () => {
     const [enr, asg] = await Promise.all([
@@ -307,32 +355,35 @@ export function ClassroomDetail() {
     else await reloadRosters();
   };
 
-  const renameClassroom = async () => {
-    setRenameError(null);
-    if (!renameValue.trim()) {
-      setRenameError('Classroom name is required.');
+  const saveClassroom = async () => {
+    setEditError(null);
+    if (!editName.trim()) {
+      setEditError('Classroom name is required.');
       return;
     }
-    setRenaming(true);
+    setSaving(true);
     const { data, error: updErr } = await supabase
       .from('classrooms')
-      .update({ name: renameValue.trim() })
+      .update({
+        name: editName.trim(),
+        level_id: editLevelId ? Number(editLevelId) : null,
+      })
       .eq('id', cid)
-      .select('id, name, center_id')
+      .select('id, name, center_id, branch_id, level_id')
       .maybeSingle();
     if (updErr) {
-      setRenameError(updErr.message);
-      setRenaming(false);
+      setEditError(updErr.message);
+      setSaving(false);
       return;
     }
     if (!data) {
-      setRenameError('You do not have permission to rename this classroom.');
-      setRenaming(false);
+      setEditError('You do not have permission to edit this classroom.');
+      setSaving(false);
       return;
     }
     setClassroom(data as unknown as ClassroomRow);
-    setRenaming(false);
-    setRenameOpen(false);
+    setSaving(false);
+    setEditOpen(false);
   };
 
   const deleteClassroom = async () => {
@@ -366,10 +417,19 @@ export function ClassroomDetail() {
   const assignedIds = new Set(
     assignments.map((a) => a.teachers?.id).filter((x): x is number => x != null),
   );
-  // Only offer students/teachers from THIS classroom's center (a director may own
-  // several centers; an RLS with_check would otherwise reject a cross-center pick).
+  // Only offer students/staff from THIS classroom's center (a director may own
+  // several centers; an RLS with_check would otherwise reject a cross-center pick)
+  // AND this classroom's branch.
+  const branchTeacherIds = new Set(
+    staffBranchRows.filter((r) => r.branch_id === classroom.branch_id).map((r) => r.teacher_id),
+  );
   const studentOptions: PickOption[] = allStudents
-    .filter((s) => s.center_id === classroom.center_id && !enrolledIds.has(s.id))
+    .filter(
+      (s) =>
+        s.center_id === classroom.center_id &&
+        s.branch_id === classroom.branch_id &&
+        !enrolledIds.has(s.id),
+    )
     .map((s) => {
       const age = ageYearsMonths(s.dob);
       const rooms = studentClassrooms[s.id];
@@ -383,25 +443,47 @@ export function ClassroomDetail() {
       };
     });
   const teacherOptions: PickOption[] = allTeachers
-    .filter((t) => t.center_id === classroom.center_id && !assignedIds.has(t.id))
+    .filter(
+      (t) =>
+        t.center_id === classroom.center_id && branchTeacherIds.has(t.id) && !assignedIds.has(t.id),
+    )
     .map((t) => ({ id: t.id, label: t.name, sublabel: t.email }));
+
+  // Levels for this room's center; the tag select only appears when levels exist.
+  const centerLevels = levels.filter((l) => l.center_id === classroom.center_id);
+  // The room's age now comes from its level; show the level name + its age band.
+  const roomLevel =
+    classroom.level_id != null ? levels.find((l) => l.id === classroom.level_id) : undefined;
+  const levelSubtitle = roomLevel
+    ? [roomLevel.name, classroomAgeLabel(roomLevel.min_age_months, roomLevel.max_age_months)]
+        .filter(Boolean)
+        .join(' · ')
+    : undefined;
+  const levelOptions = [
+    { label: 'No level', value: '' },
+    ...centerLevels.map((l) => {
+      const hint = classroomAgeLabel(l.min_age_months, l.max_age_months);
+      return { label: hint ? `${l.name} (${hint})` : l.name, value: String(l.id) };
+    }),
+  ];
 
   const headerActions = (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
       <Link to="/classrooms" style={{ fontSize: 14, fontWeight: 700, color: Brand.onSurfaceVariant }}>
         ← Classrooms
       </Link>
-      {isDirector ? (
+      {canManageRooms ? (
         <>
           <Button
             variant="secondary"
             onClick={() => {
-              setRenameValue(classroom.name);
-              setRenameError(null);
-              setRenameOpen(true);
+              setEditName(classroom.name);
+              setEditLevelId(classroom.level_id != null ? String(classroom.level_id) : '');
+              setEditError(null);
+              setEditOpen(true);
             }}
           >
-            Rename
+            Edit
           </Button>
           <Button
             variant="outline"
@@ -417,7 +499,7 @@ export function ClassroomDetail() {
 
   return (
     <div>
-      <PageHeader title={classroom.name} actions={headerActions} />
+      <PageHeader title={classroom.name} subtitle={levelSubtitle} actions={headerActions} />
 
       {actionError ? (
         <div style={{ marginBottom: 16 }}>
@@ -433,7 +515,7 @@ export function ClassroomDetail() {
       <SectionHeader
         title="Students"
         action={
-          isDirector ? (
+          canEnroll ? (
             <Button variant="secondary" onClick={() => setPicker('student')}>
               Add students
             </Button>
@@ -450,7 +532,7 @@ export function ClassroomDetail() {
               <Th align="right" width={100}>
                 Age
               </Th>
-              {isDirector ? <Th align="right" width={150} /> : null}
+              {canEnroll ? <Th align="right" width={150} /> : null}
             </tr>
           </thead>
           <tbody>
@@ -474,7 +556,7 @@ export function ClassroomDetail() {
                 <Td align="right" style={{ color: Brand.onSurfaceVariant }}>
                   {ageFromDob(en.students?.dob ?? null)}
                 </Td>
-                {isDirector ? (
+                {canEnroll ? (
                   <Td align="right">
                     <div style={{ display: 'flex', gap: 14, justifyContent: 'flex-end' }}>
                       {en.students ? (
@@ -497,7 +579,7 @@ export function ClassroomDetail() {
       <SectionHeader
         title="Teachers"
         action={
-          isDirector ? (
+          canStaff ? (
             <Button variant="secondary" onClick={() => setPicker('teacher')}>
               Assign teacher
             </Button>
@@ -523,7 +605,7 @@ export function ClassroomDetail() {
               <div style={{ flex: 1, minWidth: 0 }}>
                 {a.teachers ? (
                   <Link
-                    to={`/teachers/${a.teachers.id}`}
+                    to={`/staff/${a.teachers.id}`}
                     style={{ fontWeight: 700, color: Brand.onSurface, fontSize: 14.5 }}
                   >
                     {a.teachers.name}
@@ -535,10 +617,10 @@ export function ClassroomDetail() {
                   {a.teachers?.email ?? ''}
                 </div>
               </div>
-              {isDirector ? (
+              {canStaff ? (
                 <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
                   {a.teachers ? (
-                    <ActionLink onClick={() => navigate(`/teachers/${a.teachers!.id}/edit`)}>
+                    <ActionLink onClick={() => navigate(`/staff/${a.teachers!.id}/edit`)}>
                       Edit
                     </ActionLink>
                   ) : null}
@@ -611,22 +693,29 @@ export function ClassroomDetail() {
         />
       ) : null}
 
-      {renameOpen ? (
-        <Modal title="Rename classroom" onClose={() => (renaming ? null : setRenameOpen(false))}>
-          {renameError ? (
+      {editOpen ? (
+        <Modal title="Edit classroom" onClose={() => (saving ? null : setEditOpen(false))}>
+          {editError ? (
             <div style={{ marginBottom: 14 }}>
-              <ErrorState message={renameError} />
+              <ErrorState message={editError} />
             </div>
           ) : null}
-          <Field label="Classroom name">
-            <TextInput value={renameValue} onChange={setRenameValue} autoFocus />
-          </Field>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <Field label="Classroom name">
+              <TextInput value={editName} onChange={setEditName} autoFocus />
+            </Field>
+            {centerLevels.length > 0 ? (
+              <Field label="Level">
+                <Select value={editLevelId} onChange={setEditLevelId} options={levelOptions} />
+              </Field>
+            ) : null}
+          </div>
           <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 18 }}>
-            <Button variant="secondary" onClick={() => setRenameOpen(false)} disabled={renaming}>
+            <Button variant="secondary" onClick={() => setEditOpen(false)} disabled={saving}>
               Cancel
             </Button>
-            <Button onClick={renameClassroom} disabled={renaming}>
-              {renaming ? <Spinner size={16} /> : 'Save'}
+            <Button onClick={saveClassroom} disabled={saving}>
+              {saving ? <Spinner size={16} /> : 'Save'}
             </Button>
           </div>
         </Modal>

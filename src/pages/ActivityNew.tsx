@@ -8,10 +8,10 @@ import { Brand } from '@/lib/theme';
 
 export function ActivityNew() {
   const navigate = useNavigate();
-  const { role } = useAuth();
+  const { can } = useAuth();
 
-  // Only directors can create activities — the library is owner-only at the RLS layer.
-  if (role !== 'director') return <Navigate to="/activities" replace />;
+  // Creating activities needs manage_activities — RLS enforces the same rule.
+  if (!can('manage_activities')) return <Navigate to="/activities" replace />;
 
   const onSubmit = async (payload: ActivitySubmitPayload) => {
     const { data, error } = await supabase.rpc('add_activity', {

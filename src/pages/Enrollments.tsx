@@ -16,6 +16,7 @@ import {
   Spinner,
 } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
+import { useBranch } from '@/lib/branch';
 import { supabase } from '@/lib/supabase';
 import { Brand } from '@/lib/theme';
 
@@ -25,6 +26,7 @@ type Application = {
   child_name: string;
   child_dob: string | null;
   child_gender: string | null;
+  child_nric: string | null;
   parent_name: string | null;
   parent_email: string | null;
   parent_phone: string | null;
@@ -42,7 +44,8 @@ const STATUS_TONE: Record<string, 'warning' | 'success' | 'error' | 'neutral'> =
 };
 
 export function Enrollments() {
-  const { role } = useAuth();
+  const { can } = useAuth();
+  const { branchId } = useBranch();
 
   const [rows, setRows] = useState<Application[]>([]);
   const [classrooms, setClassrooms] = useState<{ id: number; name: string }[]>([]);
@@ -59,14 +62,16 @@ export function Enrollments() {
     setLoading(true);
     setError(null);
     try {
+      let cls = supabase.from('classrooms').select('id, name');
+      if (branchId != null) cls = cls.eq('branch_id', branchId);
       const [appsRes, clsRes] = await Promise.all([
         supabase
           .from('enrollment_applications')
           .select(
-            'id, status, child_name, child_dob, child_gender, parent_name, parent_email, parent_phone, note, student_id, created_at',
+            'id, status, child_name, child_dob, child_gender, child_nric, parent_name, parent_email, parent_phone, note, student_id, created_at',
           )
           .order('created_at', { ascending: false }),
-        supabase.from('classrooms').select('id, name').order('name'),
+        cls.order('name'),
       ]);
       if (appsRes.error) throw appsRes.error;
       if (clsRes.error) throw clsRes.error;
@@ -81,7 +86,8 @@ export function Enrollments() {
 
   useEffect(() => {
     void load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [branchId]);
 
   const counts = useMemo(() => {
     const c = { pending: 0, approved: 0, rejected: 0 };
@@ -126,7 +132,7 @@ export function Enrollments() {
     }
   };
 
-  if (role && role !== 'director') return <Navigate to="/" replace />;
+  if (!can('manage_enrollment_applications')) return <Navigate to="/" replace />;
 
   return (
     <div>
@@ -174,7 +180,9 @@ export function Enrollments() {
                         <Badge tone={STATUS_TONE[a.status] ?? 'neutral'}>{a.status}</Badge>
                       </div>
                       <div style={{ fontSize: 13, color: Brand.onSurfaceVariant, marginTop: 3 }}>
-                        {[a.child_dob, a.child_gender].filter(Boolean).join(' · ') || 'No child details'}
+                        {[a.child_dob, a.child_gender, a.child_nric ? `NRIC ${a.child_nric}` : null]
+                          .filter(Boolean)
+                          .join(' · ') || 'No child details'}
                       </div>
                     </div>
                     <div style={{ fontSize: 12.5, color: Brand.onSurfaceVariant }}>

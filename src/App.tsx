@@ -2,13 +2,20 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 
 import { Layout } from '@/components/Layout';
 import { RequireStaff } from '@/components/RequireStaff';
+import { BranchProvider } from '@/lib/branch';
+import { AccessKeys } from '@/pages/AccessKeys';
 import { Activities } from '@/pages/Activities';
+import { Announcements } from '@/pages/Announcements';
 import { ActivityDetail } from '@/pages/ActivityDetail';
 import { ActivityEdit } from '@/pages/ActivityEdit';
 import { ActivityNew } from '@/pages/ActivityNew';
 import { AssessmentDetail } from '@/pages/AssessmentDetail';
 import { Assessments } from '@/pages/Assessments';
+import { Attendance } from '@/pages/Attendance';
+import { Branches } from '@/pages/Branches';
 import { Classrooms } from '@/pages/Classrooms';
+import { Levels } from '@/pages/Levels';
+import { StaffRoles } from '@/pages/StaffRoles';
 import { ClassroomDetail } from '@/pages/ClassroomDetail';
 import { Contacts } from '@/pages/Contacts';
 import { Dashboard } from '@/pages/Dashboard';
@@ -38,7 +45,9 @@ export default function App() {
       <Route
         element={
           <RequireStaff>
-            <Layout />
+            <BranchProvider>
+              <Layout />
+            </BranchProvider>
           </RequireStaff>
         }
       >
@@ -57,14 +66,20 @@ export default function App() {
         <Route path="activities/:id" element={<ActivityDetail />} />
         <Route path="activities/:id/edit" element={<ActivityEdit />} />
         <Route path="plans" element={<Plans />} />
+        <Route path="announcements" element={<Announcements />} />
         <Route path="assessments" element={<Assessments />} />
         <Route path="assessments/:id" element={<AssessmentDetail />} />
-        <Route path="teachers" element={<Teachers />} />
-        <Route path="teachers/import" element={<TeacherImport />} />
-        <Route path="teachers/new" element={<TeacherNew />} />
-        <Route path="teachers/:id" element={<TeacherDetail />} />
-        <Route path="teachers/:id/edit" element={<TeacherEdit />} />
+        <Route path="attendance" element={<Attendance />} />
+        <Route path="staff" element={<Teachers />} />
+        <Route path="staff/import" element={<TeacherImport />} />
+        <Route path="staff/new" element={<TeacherNew />} />
+        <Route path="staff/:id" element={<TeacherDetail />} />
+        <Route path="staff/:id/edit" element={<TeacherEdit />} />
         <Route path="enrollments" element={<Enrollments />} />
+        <Route path="branches" element={<Branches />} />
+        <Route path="levels" element={<Levels />} />
+        <Route path="roles" element={<StaffRoles />} />
+        <Route path="access" element={<AccessKeys />} />
         <Route path="settings" element={<Settings />} />
       </Route>
 

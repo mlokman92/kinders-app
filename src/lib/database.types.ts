@@ -285,10 +285,100 @@ export type Database = {
         }
         Relationships: []
       }
+      branch_geofences: {
+        Row: {
+          accuracy_ceiling_m: number
+          branch_id: number
+          center_id: number
+          enforce_geofence: boolean
+          geofence_enabled: boolean
+          geofence_radius_m: number
+          latitude: number | null
+          longitude: number | null
+          updated_at: string
+        }
+        Insert: {
+          accuracy_ceiling_m?: number
+          branch_id: number
+          center_id: number
+          enforce_geofence?: boolean
+          geofence_enabled?: boolean
+          geofence_radius_m?: number
+          latitude?: number | null
+          longitude?: number | null
+          updated_at?: string
+        }
+        Update: {
+          accuracy_ceiling_m?: number
+          branch_id?: number
+          center_id?: number
+          enforce_geofence?: boolean
+          geofence_enabled?: boolean
+          geofence_radius_m?: number
+          latitude?: number | null
+          longitude?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "branch_geofences_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: true
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "branch_geofences_center_id_fkey"
+            columns: ["center_id"]
+            isOneToOne: false
+            referencedRelation: "centers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      branches: {
+        Row: {
+          address: string | null
+          center_id: number
+          created_at: string
+          id: number
+          name: string
+          phone: string | null
+          timezone: string | null
+        }
+        Insert: {
+          address?: string | null
+          center_id: number
+          created_at?: string
+          id?: number
+          name: string
+          phone?: string | null
+          timezone?: string | null
+        }
+        Update: {
+          address?: string | null
+          center_id?: number
+          created_at?: string
+          id?: number
+          name?: string
+          phone?: string | null
+          timezone?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "branches_center_id_fkey"
+            columns: ["center_id"]
+            isOneToOne: false
+            referencedRelation: "centers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       centers: {
         Row: {
           created_at: string
           description: string | null
+          enrollment_required_fields: Json
           facebook: string | null
           id: number
           instagram: string | null
@@ -302,6 +392,7 @@ export type Database = {
         Insert: {
           created_at?: string
           description?: string | null
+          enrollment_required_fields?: Json
           facebook?: string | null
           id?: never
           instagram?: string | null
@@ -315,6 +406,7 @@ export type Database = {
         Update: {
           created_at?: string
           description?: string | null
+          enrollment_required_fields?: Json
           facebook?: string | null
           id?: never
           instagram?: string | null
@@ -329,29 +421,49 @@ export type Database = {
       }
       classrooms: {
         Row: {
+          branch_id: number
           center_id: number
           created_at: string
           id: number
+          level_id: number | null
           name: string
         }
         Insert: {
+          branch_id: number
           center_id: number
           created_at?: string
           id?: never
+          level_id?: number | null
           name: string
         }
         Update: {
+          branch_id?: number
           center_id?: number
           created_at?: string
           id?: never
+          level_id?: number | null
           name?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "classrooms_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "classrooms_center_id_fkey"
             columns: ["center_id"]
             isOneToOne: false
             referencedRelation: "centers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "classrooms_level_id_fkey"
+            columns: ["level_id"]
+            isOneToOne: false
+            referencedRelation: "levels"
             referencedColumns: ["id"]
           },
         ]
@@ -534,6 +646,7 @@ export type Database = {
           child_dob: string | null
           child_gender: string | null
           child_name: string
+          child_nric: string | null
           created_at: string
           id: number
           note: string | null
@@ -549,6 +662,7 @@ export type Database = {
           child_dob?: string | null
           child_gender?: string | null
           child_name: string
+          child_nric?: string | null
           created_at?: string
           id?: never
           note?: string | null
@@ -564,6 +678,7 @@ export type Database = {
           child_dob?: string | null
           child_gender?: string | null
           child_name?: string
+          child_nric?: string | null
           created_at?: string
           id?: never
           note?: string | null
@@ -806,6 +921,42 @@ export type Database = {
           },
         ]
       }
+      impersonation_audit: {
+        Row: {
+          created_at: string
+          director_email: string | null
+          director_id: string
+          id: number
+          ip: string | null
+          mode: string
+          origin: string | null
+          target_email: string
+          target_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          director_email?: string | null
+          director_id: string
+          id?: never
+          ip?: string | null
+          mode?: string
+          origin?: string | null
+          target_email: string
+          target_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          director_email?: string | null
+          director_id?: string
+          id?: never
+          ip?: string | null
+          mode?: string
+          origin?: string | null
+          target_email?: string
+          target_id?: string | null
+        }
+        Relationships: []
+      }
       learning_areas: {
         Row: {
           area_name: string
@@ -876,6 +1027,44 @@ export type Database = {
           },
         ]
       }
+      levels: {
+        Row: {
+          center_id: number
+          created_at: string
+          id: number
+          max_age_months: number | null
+          min_age_months: number | null
+          name: string
+          sort_order: number
+        }
+        Insert: {
+          center_id: number
+          created_at?: string
+          id?: number
+          max_age_months?: number | null
+          min_age_months?: number | null
+          name: string
+          sort_order?: number
+        }
+        Update: {
+          center_id?: number
+          created_at?: string
+          id?: number
+          max_age_months?: number | null
+          min_age_months?: number | null
+          name?: string
+          sort_order?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "levels_center_id_fkey"
+            columns: ["center_id"]
+            isOneToOne: false
+            referencedRelation: "centers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       messages: {
         Row: {
           body: string
@@ -910,6 +1099,7 @@ export type Database = {
       }
       profiles: {
         Row: {
+          avatar_url: string | null
           created_at: string
           full_name: string
           id: string
@@ -917,6 +1107,7 @@ export type Database = {
           role: string
         }
         Insert: {
+          avatar_url?: string | null
           created_at?: string
           full_name?: string
           id: string
@@ -924,6 +1115,7 @@ export type Database = {
           role?: string
         }
         Update: {
+          avatar_url?: string | null
           created_at?: string
           full_name?: string
           id?: string
@@ -931,6 +1123,41 @@ export type Database = {
           role?: string
         }
         Relationships: []
+      }
+      role_permissions: {
+        Row: {
+          allowed: boolean
+          capability: string
+          center_id: number
+          created_at: string
+          id: number
+          role: string
+        }
+        Insert: {
+          allowed: boolean
+          capability: string
+          center_id: number
+          created_at?: string
+          id?: number
+          role: string
+        }
+        Update: {
+          allowed?: boolean
+          capability?: string
+          center_id?: number
+          created_at?: string
+          id?: number
+          role?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "role_permissions_center_id_fkey"
+            columns: ["center_id"]
+            isOneToOne: false
+            referencedRelation: "centers"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       schedule_items: {
         Row: {
@@ -980,6 +1207,277 @@ export type Database = {
             columns: ["classroom_id"]
             isOneToOne: false
             referencedRelation: "classrooms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      staff_attendance: {
+        Row: {
+          accepted_with_tolerance: boolean
+          accuracy_m: number | null
+          branch_id: number
+          center_id: number
+          created_at: string
+          device_id: string | null
+          distance_m: number | null
+          id: number
+          kind: string
+          latitude: number | null
+          location_unavailable: boolean
+          longitude: number | null
+          low_accuracy: boolean
+          mocked: boolean
+          needs_review: boolean
+          profile_id: string | null
+          recorded_at: string
+          review_status: string
+          source: string
+          teacher_id: number | null
+          within_geofence: boolean | null
+        }
+        Insert: {
+          accepted_with_tolerance?: boolean
+          accuracy_m?: number | null
+          branch_id: number
+          center_id: number
+          created_at?: string
+          device_id?: string | null
+          distance_m?: number | null
+          id?: never
+          kind: string
+          latitude?: number | null
+          location_unavailable?: boolean
+          longitude?: number | null
+          low_accuracy?: boolean
+          mocked?: boolean
+          needs_review?: boolean
+          profile_id?: string | null
+          recorded_at?: string
+          review_status?: string
+          source?: string
+          teacher_id?: number | null
+          within_geofence?: boolean | null
+        }
+        Update: {
+          accepted_with_tolerance?: boolean
+          accuracy_m?: number | null
+          branch_id?: number
+          center_id?: number
+          created_at?: string
+          device_id?: string | null
+          distance_m?: number | null
+          id?: never
+          kind?: string
+          latitude?: number | null
+          location_unavailable?: boolean
+          longitude?: number | null
+          low_accuracy?: boolean
+          mocked?: boolean
+          needs_review?: boolean
+          profile_id?: string | null
+          recorded_at?: string
+          review_status?: string
+          source?: string
+          teacher_id?: number | null
+          within_geofence?: boolean | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_attendance_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_attendance_center_id_fkey"
+            columns: ["center_id"]
+            isOneToOne: false
+            referencedRelation: "centers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_attendance_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_attendance_teacher_id_fkey"
+            columns: ["teacher_id"]
+            isOneToOne: false
+            referencedRelation: "teachers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      staff_attendance_consent: {
+        Row: {
+          acknowledged_at: string
+          center_id: number
+          id: number
+          notice_version: number
+          profile_id: string | null
+          teacher_id: number | null
+        }
+        Insert: {
+          acknowledged_at?: string
+          center_id: number
+          id?: never
+          notice_version: number
+          profile_id?: string | null
+          teacher_id?: number | null
+        }
+        Update: {
+          acknowledged_at?: string
+          center_id?: number
+          id?: never
+          notice_version?: number
+          profile_id?: string | null
+          teacher_id?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_attendance_consent_center_id_fkey"
+            columns: ["center_id"]
+            isOneToOne: false
+            referencedRelation: "centers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_attendance_consent_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_attendance_consent_teacher_id_fkey"
+            columns: ["teacher_id"]
+            isOneToOne: false
+            referencedRelation: "teachers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      staff_branches: {
+        Row: {
+          branch_id: number
+          created_at: string
+          id: number
+          teacher_id: number
+        }
+        Insert: {
+          branch_id: number
+          created_at?: string
+          id?: number
+          teacher_id: number
+        }
+        Update: {
+          branch_id?: number
+          created_at?: string
+          id?: number
+          teacher_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_branches_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_branches_teacher_id_fkey"
+            columns: ["teacher_id"]
+            isOneToOne: false
+            referencedRelation: "teachers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      staff_role_assignments: {
+        Row: {
+          created_at: string
+          id: number
+          staff_role_id: number
+          teacher_id: number
+        }
+        Insert: {
+          created_at?: string
+          id?: number
+          staff_role_id: number
+          teacher_id: number
+        }
+        Update: {
+          created_at?: string
+          id?: number
+          staff_role_id?: number
+          teacher_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_role_assignments_staff_role_id_fkey"
+            columns: ["staff_role_id"]
+            isOneToOne: false
+            referencedRelation: "staff_roles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_role_assignments_teacher_id_fkey"
+            columns: ["teacher_id"]
+            isOneToOne: false
+            referencedRelation: "teachers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      staff_roles: {
+        Row: {
+          branch_id: number | null
+          center_id: number
+          created_at: string
+          id: number
+          level_id: number | null
+          name: string
+        }
+        Insert: {
+          branch_id?: number | null
+          center_id: number
+          created_at?: string
+          id?: number
+          level_id?: number | null
+          name: string
+        }
+        Update: {
+          branch_id?: number | null
+          center_id?: number
+          created_at?: string
+          id?: number
+          level_id?: number | null
+          name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_roles_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_roles_center_id_fkey"
+            columns: ["center_id"]
+            isOneToOne: false
+            referencedRelation: "centers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_roles_level_id_fkey"
+            columns: ["level_id"]
+            isOneToOne: false
+            referencedRelation: "levels"
             referencedColumns: ["id"]
           },
         ]
@@ -1119,33 +1617,46 @@ export type Database = {
       }
       students: {
         Row: {
+          branch_id: number
           center_id: number
           created_at: string
           dob: string | null
           gender: string | null
           id: number
           name: string
+          nric: string | null
           profile_picture_url: string | null
         }
         Insert: {
+          branch_id: number
           center_id: number
           created_at?: string
           dob?: string | null
           gender?: string | null
           id?: never
           name: string
+          nric?: string | null
           profile_picture_url?: string | null
         }
         Update: {
+          branch_id?: number
           center_id?: number
           created_at?: string
           dob?: string | null
           gender?: string | null
           id?: never
           name?: string
+          nric?: string | null
           profile_picture_url?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "students_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "students_center_id_fkey"
             columns: ["center_id"]
@@ -1205,6 +1716,8 @@ export type Database = {
           email: string | null
           gender: string | null
           id: number
+          is_admin: boolean
+          is_teacher: boolean
           name: string
           phone: string | null
           profile_picture_url: string | null
@@ -1216,6 +1729,8 @@ export type Database = {
           email?: string | null
           gender?: string | null
           id?: never
+          is_admin?: boolean
+          is_teacher?: boolean
           name: string
           phone?: string | null
           profile_picture_url?: string | null
@@ -1227,6 +1742,8 @@ export type Database = {
           email?: string | null
           gender?: string | null
           id?: never
+          is_admin?: boolean
+          is_teacher?: boolean
           name?: string
           phone?: string | null
           profile_picture_url?: string | null
@@ -1243,7 +1760,54 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      staff_attendance_anomalies: {
+        Row: {
+          branch_id: number | null
+          center_id: number | null
+          id: number | null
+          identical_coords: boolean | null
+          impossible_travel: boolean | null
+          kind: string | null
+          needs_review: boolean | null
+          profile_id: string | null
+          recorded_at: string | null
+          review_status: string | null
+          shared_device: boolean | null
+          teacher_id: number | null
+          within_geofence: boolean | null
+          zero_accuracy: boolean | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_attendance_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_attendance_center_id_fkey"
+            columns: ["center_id"]
+            isOneToOne: false
+            referencedRelation: "centers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_attendance_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_attendance_teacher_id_fkey"
+            columns: ["teacher_id"]
+            isOneToOne: false
+            referencedRelation: "teachers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       add_activity: {
@@ -1257,7 +1821,7 @@ export type Database = {
         Returns: number
       }
       add_classroom: {
-        Args: { p_name: string }
+        Args: { p_branch_id?: number; p_name: string }
         Returns: number
       }
       add_entries: {
@@ -1282,11 +1846,13 @@ export type Database = {
       }
       add_student: {
         Args: {
+          p_branch_id?: number
           p_dob: string
           p_enrollments: Json
           p_gender: string
           p_guardians: Json
           p_name: string
+          p_nric?: string
           p_photo_url: string
         }
         Returns: number
@@ -1294,9 +1860,12 @@ export type Database = {
       add_teacher: {
         Args: {
           p_assignments: Json
+          p_branch_ids?: number[]
           p_dob: string
           p_email: string
           p_gender: string
+          p_is_admin?: boolean
+          p_is_teacher?: boolean
           p_name: string
           p_phone: string
           p_photo_url: string
@@ -1308,8 +1877,93 @@ export type Database = {
         Returns: number
       }
       block_user: { Args: { p_other: string }; Returns: undefined }
-      bulk_add_students: { Args: { p_rows: Json }; Returns: Json }
-      bulk_add_teachers: { Args: { p_rows: Json }; Returns: Json }
+      bulk_add_students: {
+        Args: { p_branch_id?: number; p_rows: Json }
+        Returns: Json
+      }
+      bulk_add_teachers: {
+        Args: { p_branch_id?: number; p_rows: Json }
+        Returns: Json
+      }
+      can_impersonate_email: { Args: { p_email: string }; Returns: boolean }
+      check_in: {
+        Args: {
+          p_accuracy_m?: number
+          p_branch_id: number
+          p_device_id?: string
+          p_lat: number
+          p_lng: number
+          p_mocked?: boolean
+        }
+        Returns: {
+          accepted_with_tolerance: boolean
+          accuracy_m: number | null
+          branch_id: number
+          center_id: number
+          created_at: string
+          device_id: string | null
+          distance_m: number | null
+          id: number
+          kind: string
+          latitude: number | null
+          location_unavailable: boolean
+          longitude: number | null
+          low_accuracy: boolean
+          mocked: boolean
+          needs_review: boolean
+          profile_id: string | null
+          recorded_at: string
+          review_status: string
+          source: string
+          teacher_id: number | null
+          within_geofence: boolean | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "staff_attendance"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      check_out: {
+        Args: {
+          p_accuracy_m?: number
+          p_branch_id: number
+          p_device_id?: string
+          p_lat: number
+          p_lng: number
+          p_mocked?: boolean
+        }
+        Returns: {
+          accepted_with_tolerance: boolean
+          accuracy_m: number | null
+          branch_id: number
+          center_id: number
+          created_at: string
+          device_id: string | null
+          distance_m: number | null
+          id: number
+          kind: string
+          latitude: number | null
+          location_unavailable: boolean
+          longitude: number | null
+          low_accuracy: boolean
+          mocked: boolean
+          needs_review: boolean
+          profile_id: string | null
+          recorded_at: string
+          review_status: string
+          source: string
+          teacher_id: number | null
+          within_geofence: boolean | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "staff_attendance"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       conversation_header: {
         Args: { p_conversation_id: number }
         Returns: {
@@ -1336,9 +1990,11 @@ export type Database = {
         Returns: number
       }
       current_push_webhook_secret: { Args: never; Returns: string }
+      debug_scope_preview: { Args: { p_target: string }; Returns: Json }
       delete_device_token: { Args: { p_token: string }; Returns: undefined }
       delete_my_center: { Args: never; Returns: boolean }
       get_center_public: { Args: { p_slug: string }; Returns: Json }
+      impersonation_targets: { Args: never; Returns: Json }
       is_user_blocked: { Args: { p_other: string }; Returns: boolean }
       list_blocked_users: {
         Args: never
@@ -1348,12 +2004,39 @@ export type Database = {
           user_id: string
         }[]
       }
+      list_branch_attendance: {
+        Args: { p_branch_id: number; p_from: string; p_to: string }
+        Returns: {
+          accepted_with_tolerance: boolean
+          branch_id: number
+          branch_name: string
+          id: number
+          kind: string
+          local_time: string
+          location_unavailable: boolean
+          low_accuracy: boolean
+          mocked: boolean
+          needs_review: boolean
+          recorded_at: string
+          review_status: string
+          staff_name: string
+          within_geofence: boolean
+        }[]
+      }
       list_message_contacts: {
         Args: never
         Returns: {
           name: string
           role: string
           user_id: string
+        }[]
+      }
+      list_my_attendance_branches: {
+        Args: never
+        Returns: {
+          branch_id: number
+          geofence_enabled: boolean
+          name: string
         }[]
       }
       list_my_conversations: {
@@ -1374,7 +2057,45 @@ export type Database = {
         Args: { p_conversation_id: number }
         Returns: undefined
       }
+      my_attendance_consent: {
+        Args: never
+        Returns: {
+          acknowledged_at: string
+          center_id: number
+          notice_version: number
+        }[]
+      }
+      my_attendance_recent: {
+        Args: { p_limit?: number }
+        Returns: {
+          accepted_with_tolerance: boolean
+          branch_id: number
+          branch_name: string
+          id: number
+          kind: string
+          local_time: string
+          location_unavailable: boolean
+          low_accuracy: boolean
+          mocked: boolean
+          needs_review: boolean
+          recorded_at: string
+          review_status: string
+          within_geofence: boolean
+        }[]
+      }
+      my_attendance_status: {
+        Args: never
+        Returns: {
+          branch_id: number
+          branch_name: string
+          is_open: boolean
+          last_kind: string
+          since: string
+        }[]
+      }
       my_linked_guardian_emails: { Args: never; Returns: string[] }
+      my_permissions: { Args: never; Returns: Json }
+      my_profile: { Args: never; Returns: Json }
       my_unread_count: { Args: never; Returns: number }
       push_targets_for_message: {
         Args: { p_message_id: number }
@@ -1389,6 +2110,10 @@ export type Database = {
         }[]
       }
       reconcile_my_role: { Args: never; Returns: string }
+      record_attendance_consent: {
+        Args: { p_notice_version: number }
+        Returns: undefined
+      }
       reject_enrollment_application: {
         Args: { p_id: number }
         Returns: undefined
@@ -1403,6 +2128,38 @@ export type Database = {
         }
         Returns: undefined
       }
+      request_manual_attendance: {
+        Args: { p_branch_id: number; p_kind: string }
+        Returns: {
+          accepted_with_tolerance: boolean
+          accuracy_m: number | null
+          branch_id: number
+          center_id: number
+          created_at: string
+          device_id: string | null
+          distance_m: number | null
+          id: number
+          kind: string
+          latitude: number | null
+          location_unavailable: boolean
+          longitude: number | null
+          low_accuracy: boolean
+          mocked: boolean
+          needs_review: boolean
+          profile_id: string | null
+          recorded_at: string
+          review_status: string
+          source: string
+          teacher_id: number | null
+          within_geofence: boolean | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "staff_attendance"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       send_broadcast: {
         Args: {
           p_audience: string
@@ -1410,6 +2167,38 @@ export type Database = {
           p_classroom_ids?: number[]
         }
         Returns: number
+      }
+      set_attendance_review: {
+        Args: { p_id: number; p_status: string }
+        Returns: {
+          accepted_with_tolerance: boolean
+          accuracy_m: number | null
+          branch_id: number
+          center_id: number
+          created_at: string
+          device_id: string | null
+          distance_m: number | null
+          id: number
+          kind: string
+          latitude: number | null
+          location_unavailable: boolean
+          longitude: number | null
+          low_accuracy: boolean
+          mocked: boolean
+          needs_review: boolean
+          profile_id: string | null
+          recorded_at: string
+          review_status: string
+          source: string
+          teacher_id: number | null
+          within_geofence: boolean | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "staff_attendance"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       set_entry_activities: {
         Args: { p_activity_ids: number[]; p_entry_id: number }
@@ -1423,6 +2212,7 @@ export type Database = {
           p_child_dob: string
           p_child_gender: string
           p_child_name: string
+          p_child_nric?: string
           p_note: string
           p_parent_email: string
           p_parent_name: string
@@ -1447,6 +2237,7 @@ export type Database = {
         Args: {
           p_center_id: number
           p_description: string
+          p_enrollment_required_fields?: Json
           p_facebook: string
           p_instagram: string
           p_logo_url: string
@@ -1461,14 +2252,26 @@ export type Database = {
         Args: { p_full_name: string; p_phone: string }
         Returns: undefined
       }
+      update_my_profile: {
+        Args: {
+          p_dob: string
+          p_full_name: string
+          p_gender: string
+          p_phone: string
+          p_photo_url: string
+        }
+        Returns: undefined
+      }
       update_student: {
         Args: {
+          p_branch_id?: number
           p_dob: string
           p_enrollments: Json
           p_gender: string
           p_guardians: Json
           p_id: number
           p_name: string
+          p_nric?: string
           p_photo_url: string
         }
         Returns: number
@@ -1476,10 +2279,13 @@ export type Database = {
       update_teacher: {
         Args: {
           p_assignments: Json
+          p_branch_ids?: number[]
           p_dob: string
           p_email: string
           p_gender: string
           p_id: number
+          p_is_admin?: boolean
+          p_is_teacher?: boolean
           p_name: string
           p_phone: string
           p_photo_url: string
