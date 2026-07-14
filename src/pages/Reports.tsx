@@ -1,117 +1,151 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Link, Navigate } from 'react-router-dom';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
 
 import {
-  Badge,
-  Button,
-  Card,
+  Avatar,
+  DateInput,
   EmptyState,
   ErrorState,
   Field,
   Loading,
+  Modal,
   PageHeader,
   Select,
   Spinner,
-  Stat,
-  StatGrid,
   Table,
   Td,
+  TextInput,
   Th,
   Toolbar,
-  DateInput,
 } from '@/components/ui';
-import { ENTRY_ACTIONS, ENTRY_EMOJI, entryLabel } from '@/constants/entry-actions';
+import { ENTRY_EMOJI, entryLabel } from '@/constants/entry-actions';
 import { useAuth } from '@/lib/auth';
 import { useBranch } from '@/lib/branch';
-import { addDays, formatDisplayDate, parseISODate, toISODate } from '@/lib/dates';
-import { entryTimeLabel, humanizeEntry } from '@/lib/entries';
-import { downloadEntriesReportPdf } from '@/lib/entriesPdf';
+import { formatDisplayDate, parseISODate, toISODate } from '@/lib/dates';
+import { entryTimeLabel, humanizeEntry, type ClassroomRef } from '@/lib/entries';
+import { downloadStudentDailyReportPdf } from '@/lib/entriesPdf';
 import { supabase } from '@/lib/supabase';
 import { Brand, ENTRY_TYPE_COLORS, Radius } from '@/lib/theme';
 
-type ClassroomRow = { id: number; name: string };
-
-type EntryRow = {
+type ClassEmbed = { id: number; name: string } | null;
+type StudentRow = { id: number; name: string; enrollments: { classrooms: ClassEmbed }[] };
+type DayEntry = {
   id: number;
   type: string;
-  entry_date: string;
   created_at: string;
-  student_id: number;
   data: Record<string, unknown> | null;
   media: { path: string; type: string }[] | null;
-  students: { name: string } | null;
+  student_id: number;
   classrooms: { name: string } | null;
   entry_activities: ({ activities: { title: string } | null } | null)[] | null;
 };
 
+/** The one-line, on-screen detail for an entry (activity entries lead with their picked titles). */
+function entryMain(e: DayEntry, classrooms: ClassroomRef[]): string {
+  const { summary } = humanizeEntry(e.type, e.data, classrooms);
+  const activities = (e.entry_activities ?? [])
+    .map((ea) => ea?.activities?.title)
+    .filter((t): t is string => !!t);
+  const desc = typeof e.data?.description === 'string' ? e.data.description.trim() : '';
+  if (e.type === 'activity' && activities.length) {
+    return [desc, activities.join(', ')].filter(Boolean).join(' — ');
+  }
+  return summary;
+}
+
+/** A compact link-styled button for a table row's quick actions. */
+function ActionLink({
+  onClick,
+  disabled,
+  children,
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        border: 'none',
+        background: 'transparent',
+        color: disabled ? Brand.onSurfaceVariant : Brand.onPrimaryContainer,
+        fontSize: 13,
+        fontWeight: 700,
+        cursor: disabled ? 'default' : 'pointer',
+        padding: 0,
+        whiteSpace: 'nowrap',
+        opacity: disabled ? 0.6 : 1,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
 export function Reports() {
   const { can } = useAuth();
   const { branchId } = useBranch();
-  const [classrooms, setClassrooms] = useState<ClassroomRow[]>([]);
-  const [classroom, setClassroom] = useState('all');
-  const [type, setType] = useState('all');
-  const [from, setFrom] = useState(() => toISODate(addDays(new Date(), -6)));
-  const [to, setTo] = useState(() => toISODate(new Date()));
+  const navigate = useNavigate();
 
-  const [entries, setEntries] = useState<EntryRow[]>([]);
+  const [date, setDate] = useState(() => toISODate(new Date()));
+  const [classrooms, setClassrooms] = useState<ClassroomRef[]>([]);
+  const [students, setStudents] = useState<StudentRow[]>([]);
+  const [dayEntries, setDayEntries] = useState<DayEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [pdfBusy, setPdfBusy] = useState(false);
 
-  // Load classrooms for the filter, scoped to the selected branch.
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      let q = supabase.from('classrooms').select('id, name').order('name');
-      if (branchId !== null) q = q.eq('branch_id', branchId);
-      const { data, error: err } = await q;
-      if (!active) return;
-      if (err) {
-        setError(err.message);
-        return;
-      }
-      const rows = (data ?? []) as unknown as ClassroomRow[];
-      setClassrooms(rows);
-      // Drop a classroom selection that fell out of the branch.
-      setClassroom((prev) =>
-        prev !== 'all' && !rows.some((c) => String(c.id) === prev) ? 'all' : prev,
-      );
-    })();
-    return () => {
-      active = false;
-    };
-  }, [branchId]);
+  const [query, setQuery] = useState('');
+  const [classroomFilter, setClassroomFilter] = useState('all');
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
+  const [viewId, setViewId] = useState<number | null>(null);
 
-  // Refetch entries whenever the filters change.
+  // Roster + the chosen day's entries, both scoped to the selected branch (RLS additionally
+  // scopes to the caller's role — director = whole center, admin = branches, teacher = classrooms).
   useEffect(() => {
     let active = true;
     (async () => {
       setLoading(true);
       setError(null);
       try {
-        let q = supabase
+        let clsQ = supabase.from('classrooms').select('id, name').order('name');
+        if (branchId !== null) clsQ = clsQ.eq('branch_id', branchId);
+        const clsRes = await clsQ;
+        if (clsRes.error) throw clsRes.error;
+        const cls = (clsRes.data ?? []) as unknown as ClassroomRef[];
+
+        // When a branch is picked, narrow the day's entries to that branch's classrooms.
+        let branchClassIds: number[] | null = null;
+        if (branchId !== null) {
+          branchClassIds = cls.map((c) => c.id);
+          if (branchClassIds.length === 0) branchClassIds = [-1];
+        }
+
+        let stuQ = supabase
+          .from('students')
+          .select('id, name, enrollments(classrooms(id, name))')
+          .order('name');
+        if (branchId !== null) stuQ = stuQ.eq('branch_id', branchId);
+
+        let entQ = supabase
           .from('entries')
           .select(
-            'id, type, entry_date, created_at, student_id, data, media, students(name), classrooms(name), entry_activities(activities(title))',
+            'id, type, created_at, data, media, student_id, classrooms(name), entry_activities(activities(title))',
           )
-          .gte('entry_date', from)
-          .lte('entry_date', to)
-          .order('entry_date', { ascending: false })
-          .order('created_at', { ascending: false })
-          .limit(2000);
-        if (classroom !== 'all') {
-          q = q.eq('classroom_id', Number(classroom));
-        } else if (branchId !== null) {
-          // No classroom filter: narrow to the branch's classrooms.
-          const clsRes = await supabase.from('classrooms').select('id').eq('branch_id', branchId);
-          if (clsRes.error) throw clsRes.error;
-          const ids = (clsRes.data ?? []).map((c) => c.id);
-          q = q.in('classroom_id', ids.length > 0 ? ids : [-1]);
-        }
-        const { data, error: err } = await q;
+          .eq('entry_date', date)
+          .order('created_at', { ascending: true });
+        if (branchClassIds) entQ = entQ.in('classroom_id', branchClassIds);
+
+        const [stuRes, entRes] = await Promise.all([stuQ, entQ]);
         if (!active) return;
-        if (err) throw err;
-        setEntries((data ?? []) as unknown as EntryRow[]);
+        if (stuRes.error) throw stuRes.error;
+        if (entRes.error) throw entRes.error;
+
+        setClassrooms(cls);
+        setStudents((stuRes.data ?? []) as unknown as StudentRow[]);
+        setDayEntries((entRes.data ?? []) as unknown as DayEntry[]);
       } catch (e) {
         if (active) setError(e instanceof Error ? e.message : 'Failed to load reports.');
       } finally {
@@ -121,7 +155,17 @@ export function Reports() {
     return () => {
       active = false;
     };
-  }, [classroom, from, to, branchId]);
+  }, [branchId, date]);
+
+  const entriesByStudent = useMemo(() => {
+    const m = new Map<number, DayEntry[]>();
+    for (const e of dayEntries) {
+      const arr = m.get(e.student_id);
+      if (arr) arr.push(e);
+      else m.set(e.student_id, [e]);
+    }
+    return m;
+  }, [dayEntries]);
 
   const classroomOptions = useMemo(
     () => [
@@ -131,134 +175,39 @@ export function Reports() {
     [classrooms],
   );
 
-  const typeOptions = useMemo(
-    () => [{ label: 'All types', value: 'all' }, ...ENTRY_ACTIONS.map((a) => ({ label: a.label, value: a.key }))],
-    [],
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return students.filter((s) => {
+      if (
+        classroomFilter !== 'all' &&
+        !s.enrollments.some((en) => en.classrooms && String(en.classrooms.id) === classroomFilter)
+      ) {
+        return false;
+      }
+      if (q && !s.name.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [students, query, classroomFilter]);
+
+  const withReport = useMemo(
+    () => filtered.filter((s) => (entriesByStudent.get(s.id)?.length ?? 0) > 0).length,
+    [filtered, entriesByStudent],
   );
 
-  // The actual reports feed: entries (optionally narrowed by type). The query already
-  // returns them newest-first (descending date, created_at).
-  const feedEntries = useMemo(
-    () => (type === 'all' ? entries : entries.filter((e) => e.type === type)),
-    [entries, type],
-  );
-
-  // Group the feed into day sections, preserving the newest-first order.
-  const feedByDate = useMemo(() => {
-    const groups: { date: string; rows: EntryRow[] }[] = [];
-    for (const e of feedEntries) {
-      const last = groups[groups.length - 1];
-      if (last && last.date === e.entry_date) last.rows.push(e);
-      else groups.push({ date: e.entry_date, rows: [e] });
-    }
-    return groups;
-  }, [feedEntries]);
-
-  const classroomName =
-    classroom === 'all'
-      ? 'All classrooms'
-      : classrooms.find((c) => String(c.id) === classroom)?.name ?? 'Classroom';
-
-  const downloadPdf = async () => {
-    setPdfBusy(true);
+  const download = async (id: number) => {
+    setDownloadingId(id);
+    setError(null);
     try {
-      await downloadEntriesReportPdf(feedEntries, {
-        from,
-        to,
-        classroomName,
-        typeLabel: type === 'all' ? 'All types' : entryLabel(type),
-        classrooms,
-      });
+      await downloadStudentDailyReportPdf(id, date);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not generate the PDF.');
     } finally {
-      setPdfBusy(false);
+      setDownloadingId(null);
     }
   };
 
-  // Number of calendar days in the inclusive range (used for "avg per day").
-  const rangeDays = useMemo(() => {
-    const a = parseISODate(from).getTime();
-    const b = parseISODate(to).getTime();
-    if (Number.isNaN(a) || Number.isNaN(b) || b < a) return 1;
-    return Math.round((b - a) / 86_400_000) + 1;
-  }, [from, to]);
-
-  const stats = useMemo(() => {
-    const dates = new Set<string>();
-    const students = new Set<number>();
-    for (const e of entries) {
-      dates.add(e.entry_date);
-      students.add(e.student_id);
-    }
-    const total = entries.length;
-    return {
-      total,
-      daysWithActivity: dates.size,
-      avgPerDay: rangeDays > 0 ? (total / rangeDays).toFixed(1) : '0.0',
-      studentsLogged: students.size,
-    };
-  }, [entries, rangeDays]);
-
-  const byType = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const e of entries) m.set(e.type, (m.get(e.type) ?? 0) + 1);
-    return [...m.entries()]
-      .map(([type, count]) => ({ type, count }))
-      .sort((a, b) => b.count - a.count);
-  }, [entries]);
-
-  const maxTypeCount = useMemo(
-    () => byType.reduce((max, t) => Math.max(max, t.count), 0),
-    [byType],
-  );
-
-  const byDay = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const e of entries) m.set(e.entry_date, (m.get(e.entry_date) ?? 0) + 1);
-    return [...m.entries()]
-      .map(([date, count]) => ({ date, count }))
-      .sort((a, b) => a.date.localeCompare(b.date));
-  }, [entries]);
-
-  const maxDayCount = useMemo(
-    () => byDay.reduce((max, d) => Math.max(max, d.count), 0),
-    [byDay],
-  );
-
-  const attendance = useMemo(() => {
-    let checkIn = 0;
-    let checkOut = 0;
-    for (const e of entries) {
-      if (e.type === 'check_in') checkIn += 1;
-      else if (e.type === 'checkout') checkOut += 1;
-    }
-    return { checkIn, checkOut };
-  }, [entries]);
-
-  const byClassroom = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const e of entries) {
-      const name = e.classrooms?.name ?? 'Unassigned';
-      m.set(name, (m.get(name) ?? 0) + 1);
-    }
-    return [...m.entries()]
-      .map(([name, count]) => ({ name, count }))
-      .sort((a, b) => b.count - a.count);
-  }, [entries]);
-
-  const topStudents = useMemo(() => {
-    const m = new Map<number, { name: string; count: number }>();
-    for (const e of entries) {
-      const cur = m.get(e.student_id);
-      if (cur) cur.count += 1;
-      else m.set(e.student_id, { name: e.students?.name ?? 'Student', count: 1 });
-    }
-    return [...m.entries()]
-      .map(([id, v]) => ({ id, name: v.name, count: v.count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 10);
-  }, [entries]);
+  const viewStudent = viewId != null ? students.find((s) => s.id === viewId) ?? null : null;
+  const isToday = date === toISODate(new Date());
 
   // Placed after all hooks so hook order stays stable.
   if (!can('view_reports')) return <Navigate to="/" replace />;
@@ -266,360 +215,242 @@ export function Reports() {
   return (
     <div>
       <PageHeader
-        title="Reports"
-        subtitle="Journal entries logged across your center."
-        actions={
-          <Button onClick={downloadPdf} disabled={pdfBusy || feedEntries.length === 0}>
-            {pdfBusy ? <Spinner size={16} /> : 'Download PDF'}
-          </Button>
+        title="Daily reports"
+        subtitle={
+          loading
+            ? "Each child's report for the day."
+            : `${withReport} of ${filtered.length} ${filtered.length === 1 ? 'child has' : 'children have'} a report ${isToday ? 'today' : 'this day'}.`
         }
       />
 
       <Toolbar>
-        <Field label="Classroom">
-          <Select value={classroom} onChange={setClassroom} options={classroomOptions} />
+        <Field label="Date">
+          <DateInput value={date} onChange={setDate} />
         </Field>
-        <Field label="From">
-          <DateInput value={from} onChange={setFrom} />
-        </Field>
-        <Field label="To">
-          <DateInput value={to} onChange={setTo} />
-        </Field>
+        <div style={{ flex: 2, minWidth: 200 }}>
+          <Field label="Search">
+            <TextInput value={query} onChange={setQuery} placeholder="Search by child's name…" style={{ width: '100%' }} />
+          </Field>
+        </div>
+        {classrooms.length > 0 ? (
+          <Field label="Classroom">
+            <Select value={classroomFilter} onChange={setClassroomFilter} options={classroomOptions} />
+          </Field>
+        ) : null}
       </Toolbar>
 
       {loading ? (
         <Loading />
       ) : error ? (
         <ErrorState message={error} />
-      ) : entries.length === 0 ? (
-        <EmptyState title="No entries in this range" icon="📭" />
+      ) : students.length === 0 ? (
+        <EmptyState title="No students yet" message="Add children to your roster to see daily reports." icon="🧒" />
+      ) : filtered.length === 0 ? (
+        <EmptyState title="No matches" message="No children match your search." icon="🔍" />
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          {/* The reports feed — the actual journal entries teachers logged */}
-          <div>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 12,
-                marginBottom: 12,
-                flexWrap: 'wrap',
-              }}
-            >
-              <h2 style={{ fontSize: 16, fontWeight: 800, color: Brand.onSurface, margin: 0 }}>Entries</h2>
-              <div style={{ width: 200 }}>
-                <Select value={type} onChange={setType} options={typeOptions} />
-              </div>
-            </div>
-
-            {feedByDate.length === 0 ? (
-              <Card style={{ textAlign: 'center', color: Brand.onSurfaceVariant, fontSize: 14 }}>
-                No {entryLabel(type).toLowerCase()} entries in this range.
-              </Card>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                {feedByDate.map((day) => (
-                  <Card key={day.date} padding={0}>
-                    <div
-                      style={{
-                        padding: '12px 18px',
-                        fontSize: 13.5,
-                        fontWeight: 800,
-                        color: Brand.onSurface,
-                        borderBottom: `1px solid ${Brand.outlineVariant}`,
-                        background: Brand.surfaceContainerLow,
-                      }}
+        <Table>
+          <thead>
+            <tr>
+              <Th>Student</Th>
+              <Th>Classroom</Th>
+              <Th align="right" width={110}>Entries</Th>
+              <Th align="right" width={190}>Report</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((s) => {
+              const rows = entriesByStudent.get(s.id) ?? [];
+              const classes = s.enrollments
+                .map((en) => en.classrooms?.name)
+                .filter((n): n is string => !!n)
+                .join(', ');
+              const has = rows.length > 0;
+              return (
+                <tr key={s.id}>
+                  <Td>
+                    <Link
+                      to={`/students/${s.id}`}
+                      style={{ display: 'flex', alignItems: 'center', gap: 12, color: Brand.onSurface }}
                     >
-                      {formatDisplayDate(parseISODate(day.date))}
+                      <Avatar name={s.name} />
+                      <span style={{ fontWeight: 700 }}>{s.name}</span>
+                    </Link>
+                  </Td>
+                  <Td style={{ color: classes ? Brand.onSurface : Brand.onSurfaceVariant }}>
+                    {classes || '—'}
+                  </Td>
+                  <Td align="right">
+                    {has ? (
+                      <span style={{ fontWeight: 700 }}>{rows.length}</span>
+                    ) : (
+                      <span style={{ color: Brand.onSurfaceVariant }}>—</span>
+                    )}
+                  </Td>
+                  <Td align="right">
+                    <div style={{ display: 'flex', gap: 16, justifyContent: 'flex-end', alignItems: 'center' }}>
+                      <ActionLink onClick={() => setViewId(s.id)} disabled={!has}>
+                        View report
+                      </ActionLink>
+                      <ActionLink onClick={() => download(s.id)} disabled={!has || downloadingId === s.id}>
+                        {downloadingId === s.id ? <Spinner size={14} /> : 'Download'}
+                      </ActionLink>
                     </div>
-                    {day.rows.map((e, i) => {
-                      const { summary, note } = humanizeEntry(e.type, e.data, classrooms);
-                      const activities = (e.entry_activities ?? [])
-                        .map((ea) => ea?.activities?.title)
-                        .filter((t): t is string => !!t);
-                      const desc = typeof e.data?.description === 'string' ? e.data.description.trim() : '';
-                      const main =
-                        e.type === 'activity' && activities.length
-                          ? [desc, activities.join(', ')].filter(Boolean).join(' — ')
-                          : summary;
-                      const mediaCount = e.media?.length ?? 0;
-                      const time = entryTimeLabel(e.data, e.created_at);
-                      return (
-                        <div
-                          key={e.id}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'flex-start',
-                            gap: 14,
-                            padding: '14px 18px',
-                            borderTop: i === 0 ? 'none' : `1px solid ${Brand.outlineVariant}`,
-                          }}
-                        >
-                          <div style={{ fontSize: 22, lineHeight: 1.1 }}>{ENTRY_EMOJI[e.type] ?? '•'}</div>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-                              <Link
-                                to={`/students/${e.student_id}`}
-                                style={{ fontSize: 14.5, fontWeight: 700, color: Brand.onSurface }}
-                              >
-                                {e.students?.name ?? 'Student'}
-                              </Link>
-                              <span style={{ fontSize: 12.5, color: Brand.onSurfaceVariant }}>
-                                {[e.classrooms?.name, time].filter(Boolean).join(' · ')}
-                              </span>
-                            </div>
-                            <div style={{ fontSize: 14, color: Brand.onSurface, marginTop: 2 }}>{main}</div>
-                            {note && note !== main ? (
-                              <div style={{ fontSize: 13, color: Brand.onSurfaceVariant, marginTop: 3 }}>
-                                {note}
-                              </div>
-                            ) : null}
-                            {mediaCount > 0 ? (
-                              <div style={{ fontSize: 12.5, color: Brand.onSurfaceVariant, marginTop: 4 }}>
-                                📷 {mediaCount} {mediaCount === 1 ? 'photo/video' : 'photos/videos'}
-                              </div>
-                            ) : null}
-                          </div>
-                          <Badge tone="neutral">{entryLabel(e.type)}</Badge>
-                        </div>
-                      );
-                    })}
-                  </Card>
-                ))}
-              </div>
-            )}
-          </div>
+                  </Td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </Table>
+      )}
 
-          <StatGrid>
-            <Stat label="Total entries" value={stats.total} icon="📝" accent={Brand.primary} />
-            <Stat
-              label="Days with activity"
-              value={stats.daysWithActivity}
-              icon="📅"
-              accent={Brand.success}
-            />
-            <Stat label="Avg per day" value={stats.avgPerDay} icon="📈" accent={Brand.tertiary} />
-            <Stat
-              label="Students logged"
-              value={stats.studentsLogged}
-              icon="🧒"
-              accent={Brand.secondary}
-            />
-          </StatGrid>
+      {viewStudent ? (
+        <Modal
+          title={`${viewStudent.name} — ${formatDisplayDate(parseISODate(date))}`}
+          onClose={() => setViewId(null)}
+          width={560}
+        >
+          <DailyReportView
+            rows={entriesByStudent.get(viewStudent.id) ?? []}
+            classrooms={classrooms}
+            downloading={downloadingId === viewStudent.id}
+            onDownload={() => download(viewStudent.id)}
+            onOpenStudent={() => {
+              setViewId(null);
+              navigate(`/students/${viewStudent.id}`);
+            }}
+          />
+        </Modal>
+      ) : null}
+    </div>
+  );
+}
 
-          {/* Entries by type */}
-          <Card>
-            <h2 style={{ fontSize: 16, fontWeight: 800, color: Brand.onSurface, marginBottom: 16 }}>
-              Entries by type
-            </h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {byType.map((t) => {
-                const color = ENTRY_TYPE_COLORS[t.type] ?? Brand.primary;
-                const pct = maxTypeCount > 0 ? (t.count / maxTypeCount) * 100 : 0;
-                return (
-                  <div key={t.type} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <div
-                      style={{
-                        width: 150,
-                        flexShrink: 0,
-                        fontSize: 13.5,
-                        color: Brand.onSurface,
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                      }}
-                    >
-                      <span style={{ marginRight: 6 }}>{ENTRY_EMOJI[t.type] ?? '•'}</span>
-                      {entryLabel(t.type)}
-                    </div>
-                    <div
-                      style={{
-                        flex: 1,
-                        height: 18,
-                        borderRadius: Radius.full,
-                        background: Brand.surfaceContainerLow,
-                        overflow: 'hidden',
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: `${pct}%`,
-                          height: '100%',
-                          background: color,
-                          borderRadius: Radius.full,
-                          minWidth: t.count > 0 ? 6 : 0,
-                          transition: 'width 0.3s',
-                        }}
-                      />
-                    </div>
-                    <div
-                      style={{
-                        width: 36,
-                        flexShrink: 0,
-                        textAlign: 'right',
-                        fontSize: 14,
-                        fontWeight: 700,
-                        color: Brand.onSurface,
-                      }}
-                    >
-                      {t.count}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </Card>
-
-          {/* Daily activity */}
-          <Card>
-            <h2 style={{ fontSize: 16, fontWeight: 800, color: Brand.onSurface, marginBottom: 16 }}>
-              Daily activity
-            </h2>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'flex-end',
-                gap: 10,
-                overflowX: 'auto',
-                paddingBottom: 4,
-              }}
-            >
-              {byDay.map((d) => {
-                const h = maxDayCount > 0 ? Math.max((d.count / maxDayCount) * 120, 4) : 4;
-                const label = parseISODate(d.date).toLocaleDateString(undefined, {
-                  weekday: 'short',
-                  day: 'numeric',
-                });
-                return (
-                  <div
-                    key={d.date}
-                    style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      gap: 6,
-                      minWidth: 44,
-                    }}
-                  >
-                    <div style={{ fontSize: 12, fontWeight: 700, color: Brand.onSurface }}>
-                      {d.count}
-                    </div>
-                    <div
-                      style={{
-                        width: 28,
-                        height: h,
-                        background: Brand.primary,
-                        borderRadius: Radius.base,
-                        transition: 'height 0.3s',
-                      }}
-                    />
-                    <div
-                      style={{
-                        fontSize: 11.5,
-                        color: Brand.onSurfaceVariant,
-                        whiteSpace: 'nowrap',
-                        textAlign: 'center',
-                      }}
-                    >
-                      {label}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </Card>
-
-          {/* Attendance */}
-          <Card>
-            <h2 style={{ fontSize: 16, fontWeight: 800, color: Brand.onSurface, marginBottom: 16 }}>
-              Attendance
-            </h2>
-            <StatGrid>
-              <Stat
-                label="Check-ins"
-                value={attendance.checkIn}
-                icon="👋"
-                accent={ENTRY_TYPE_COLORS.check_in}
-              />
-              <Stat
-                label="Checkouts"
-                value={attendance.checkOut}
-                icon="🏡"
-                accent={ENTRY_TYPE_COLORS.checkout}
-              />
-            </StatGrid>
-          </Card>
-
-          {/* By classroom (only when viewing all classrooms) */}
-          {classroom === 'all' ? (
-            <div>
-              <h2
+/** On-screen version of the daily sheet: the day's entries in time order, with a download button. */
+function DailyReportView({
+  rows,
+  classrooms,
+  downloading,
+  onDownload,
+  onOpenStudent,
+}: {
+  rows: DayEntry[];
+  classrooms: ClassroomRef[];
+  downloading: boolean;
+  onDownload: () => void;
+  onOpenStudent: () => void;
+}) {
+  return (
+    <div>
+      {rows.length === 0 ? (
+        <div style={{ padding: '20px 0', color: Brand.onSurfaceVariant, fontSize: 14 }}>
+          No entries logged on this day.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, margin: '4px 0 16px' }}>
+          {rows.map((e, i) => {
+            const color = ENTRY_TYPE_COLORS[e.type] ?? Brand.primary;
+            const time = entryTimeLabel(e.data, e.created_at);
+            const note = humanizeEntry(e.type, e.data, classrooms).note;
+            const main = entryMain(e, classrooms);
+            const mediaCount = e.media?.length ?? 0;
+            return (
+              <div
+                key={e.id}
                 style={{
-                  fontSize: 16,
-                  fontWeight: 800,
-                  color: Brand.onSurface,
-                  marginBottom: 12,
+                  display: 'flex',
+                  gap: 12,
+                  padding: '10px 4px',
+                  borderTop: i === 0 ? 'none' : `1px solid ${Brand.outlineVariant}`,
                 }}
               >
-                By classroom
-              </h2>
-              <Table>
-                <thead>
-                  <tr>
-                    <Th>Classroom</Th>
-                    <Th align="right" width={120}>
-                      Entries
-                    </Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {byClassroom.map((c) => (
-                    <tr key={c.name}>
-                      <Td style={{ fontWeight: 600 }}>{c.name}</Td>
-                      <Td align="right">{c.count}</Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
-            </div>
-          ) : null}
-
-          {/* Most active students */}
-          <div>
-            <h2
-              style={{ fontSize: 16, fontWeight: 800, color: Brand.onSurface, marginBottom: 12 }}
-            >
-              Most active students
-            </h2>
-            <Table>
-              <thead>
-                <tr>
-                  <Th>Student</Th>
-                  <Th align="right" width={120}>
-                    Entries
-                  </Th>
-                </tr>
-              </thead>
-              <tbody>
-                {topStudents.map((s) => (
-                  <tr key={s.id}>
-                    <Td>
-                      <Link
-                        to={`/students/${s.id}`}
-                        style={{ fontWeight: 600, color: Brand.onSurface }}
-                      >
-                        {s.name}
-                      </Link>
-                    </Td>
-                    <Td align="right">{s.count}</Td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          </div>
+                <div
+                  style={{
+                    width: 30,
+                    height: 30,
+                    borderRadius: 9,
+                    flexShrink: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: 15,
+                    background: color + '22',
+                    border: `1px solid ${color}44`,
+                  }}
+                >
+                  {ENTRY_EMOJI[e.type] ?? '•'}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: Brand.onSurface }}>
+                      {entryLabel(e.type)}
+                    </span>
+                    {time ? (
+                      <span style={{ fontSize: 12, color: Brand.onSurfaceVariant }}>{time}</span>
+                    ) : null}
+                  </div>
+                  <div style={{ fontSize: 13.5, color: Brand.onSurface, marginTop: 1 }}>{main}</div>
+                  {note && note !== main ? (
+                    <div style={{ fontSize: 12.5, color: Brand.onSurfaceVariant, marginTop: 2 }}>{note}</div>
+                  ) : null}
+                  {mediaCount > 0 ? (
+                    <div style={{ fontSize: 12, color: Brand.onSurfaceVariant, marginTop: 3 }}>
+                      📷 {mediaCount} {mediaCount === 1 ? 'photo/video' : 'photos/videos'}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
+
+      <div
+        style={{
+          display: 'flex',
+          gap: 12,
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          paddingTop: 14,
+          borderTop: `1px solid ${Brand.outlineVariant}`,
+        }}
+      >
+        <button
+          type="button"
+          onClick={onOpenStudent}
+          style={{
+            border: 'none',
+            background: 'transparent',
+            color: Brand.onSurfaceVariant,
+            fontSize: 13,
+            fontWeight: 700,
+            cursor: 'pointer',
+            padding: 0,
+          }}
+        >
+          Open profile →
+        </button>
+        <button
+          type="button"
+          onClick={onDownload}
+          disabled={downloading || rows.length === 0}
+          style={{
+            border: 'none',
+            borderRadius: Radius.full,
+            background: Brand.primary,
+            color: Brand.onPrimary,
+            padding: '10px 18px',
+            fontSize: 14,
+            fontWeight: 700,
+            cursor: downloading || rows.length === 0 ? 'default' : 'pointer',
+            opacity: rows.length === 0 ? 0.5 : 1,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
+          {downloading ? <Spinner size={16} /> : 'Download PDF'}
+        </button>
+      </div>
     </div>
   );
 }

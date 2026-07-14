@@ -20,7 +20,7 @@ import { modelMeta } from '@/lib/assessments';
 import { useAuth } from '@/lib/auth';
 import { formatDisplayDate, parseISODate } from '@/lib/dates';
 import { entryTimeLabel, humanizeEntry } from '@/lib/entries';
-import { downloadStudentDailyReportPdf, downloadStudentJournalPdf } from '@/lib/entriesPdf';
+import { downloadStudentDailyReportPdf } from '@/lib/entriesPdf';
 import { getEntryMediaUrls, getStudentPhotoUrl } from '@/lib/storage';
 import { supabase } from '@/lib/supabase';
 import { Brand, Radius } from '@/lib/theme';
@@ -101,7 +101,6 @@ export function StudentDetail() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [addContactOpen, setAddContactOpen] = useState(false);
   const [newAssessOpen, setNewAssessOpen] = useState(false);
-  const [pdfBusy, setPdfBusy] = useState(false);
   const [dailyBusy, setDailyBusy] = useState<string | null>(null);
 
   const reloadGuardians = async () => {
@@ -204,18 +203,6 @@ export function StudentDetail() {
     }
   };
 
-  const downloadJournal = async () => {
-    setPdfBusy(true);
-    setActionError(null);
-    try {
-      await downloadStudentJournalPdf(sid);
-    } catch (e) {
-      setActionError(e instanceof Error ? e.message : 'Could not generate the PDF.');
-    } finally {
-      setPdfBusy(false);
-    }
-  };
-
   const downloadDaily = async (date: string) => {
     setDailyBusy(date);
     setActionError(null);
@@ -240,11 +227,6 @@ export function StudentDetail() {
   const headerActions = (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
       {backLink}
-      {isStaff ? (
-        <Button variant="secondary" onClick={downloadJournal} disabled={pdfBusy}>
-          {pdfBusy ? <Spinner size={16} /> : 'Journal PDF'}
-        </Button>
-      ) : null}
       {can('edit_students') ? (
         <Button variant="secondary" onClick={() => navigate(`/students/${sid}/edit`)}>
           Edit

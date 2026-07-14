@@ -755,6 +755,7 @@ export type Database = {
         Row: {
           center_id: number
           classroom_id: number
+          client_token: string | null
           created_at: string
           data: Json
           entry_date: string
@@ -766,6 +767,7 @@ export type Database = {
         Insert: {
           center_id: number
           classroom_id: number
+          client_token?: string | null
           created_at?: string
           data?: Json
           entry_date?: string
@@ -777,6 +779,7 @@ export type Database = {
         Update: {
           center_id?: number
           classroom_id?: number
+          client_token?: string | null
           created_at?: string
           data?: Json
           entry_date?: string
@@ -1828,6 +1831,7 @@ export type Database = {
         Args: {
           p_activity_ids?: number[]
           p_classroom_id: number
+          p_client_token?: string
           p_data: Json
           p_entry_date: string
           p_media: Json
@@ -1994,6 +1998,7 @@ export type Database = {
       delete_device_token: { Args: { p_token: string }; Returns: undefined }
       delete_my_center: { Args: never; Returns: boolean }
       get_center_public: { Args: { p_slug: string }; Returns: Json }
+      home_summary: { Args: { p_branch_id?: number; p_today?: string }; Returns: Json }
       impersonation_targets: { Args: never; Returns: Json }
       is_user_blocked: { Args: { p_other: string }; Returns: boolean }
       list_blocked_users: {

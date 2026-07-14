@@ -72,13 +72,21 @@ export function Stat({
   hint,
   accent = Brand.primary,
   icon,
+  trend,
+  tone = 'default',
 }: {
   label: string;
   value: ReactNode;
   hint?: string;
   accent?: string;
   icon?: ReactNode;
+  /** A small directional delta shown under the value (e.g. week-over-week). */
+  trend?: { dir: 'up' | 'down'; label: string };
+  /** `alert` recolors the value + icon chip to the error tone (e.g. someone is unwell). */
+  tone?: 'default' | 'alert';
 }) {
+  const alert = tone === 'alert';
+  const iconBg = alert ? Brand.errorContainer : accent + '22';
   return (
     <Card padding={18}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -88,11 +96,12 @@ export function Stat({
               width: 42,
               height: 42,
               borderRadius: Radius.md,
-              background: accent + '22',
+              background: iconBg,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               fontSize: 20,
+              flexShrink: 0,
             }}
           >
             {icon}
@@ -100,15 +109,56 @@ export function Stat({
         ) : null}
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: Brand.onSurfaceVariant }}>{label}</div>
-          <div style={{ fontSize: 26, fontWeight: 800, color: Brand.onSurface, lineHeight: 1.1 }}>
+          <div
+            style={{
+              fontSize: 26,
+              fontWeight: 800,
+              color: alert ? Brand.error : Brand.onSurface,
+              lineHeight: 1.1,
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          >
             {value}
           </div>
+          {trend ? (
+            <div
+              style={{
+                fontSize: 12,
+                fontWeight: 700,
+                color: trend.dir === 'up' ? Brand.success : Brand.secondary,
+                marginTop: 2,
+              }}
+            >
+              {trend.dir === 'up' ? '▲' : '▼'} {trend.label}
+            </div>
+          ) : null}
           {hint ? (
             <div style={{ fontSize: 12, color: Brand.onSurfaceVariant, marginTop: 2 }}>{hint}</div>
           ) : null}
         </div>
       </div>
     </Card>
+  );
+}
+
+/** A compact uppercase section label with an optional right-aligned action (link/button). */
+export function SectionHeading({ title, action }: { title: string; action?: ReactNode }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '28px 0 14px' }}>
+      <h2
+        style={{
+          fontSize: 13,
+          fontWeight: 800,
+          letterSpacing: 0.4,
+          textTransform: 'uppercase',
+          color: Brand.onSurfaceVariant,
+        }}
+      >
+        {title}
+      </h2>
+      <div style={{ flex: 1 }} />
+      {action}
+    </div>
   );
 }
 
