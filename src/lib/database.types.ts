@@ -1990,6 +1990,7 @@ export type Database = {
           p_center_name: string
           p_classroom_names: string[]
           p_full_name?: string
+          p_phone?: string
         }
         Returns: number
       }

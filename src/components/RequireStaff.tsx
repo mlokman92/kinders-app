@@ -5,9 +5,10 @@ import { Brand, Radius } from '@/lib/theme';
 import { Button, Loading } from './ui';
 
 /**
- * Gate the authenticated area. The web dashboard is staff-only:
+ * Gate the authenticated area, and act as the single routing authority for a signed-in user —
+ * the web analogue of mobile's `src/app/index.tsx`. The web dashboard is staff-only:
  *  - no session                  -> /login
- *  - session, role pending       -> "ask your center" notice
+ *  - session, role pending       -> /pending (wait for an invite, or set up a center)
  *  - session, role parent        -> "use the mobile app" notice
  *  - director / admin / teacher  -> render children
  */
@@ -24,16 +25,14 @@ export function RequireStaff({ children }: { children: React.ReactNode }) {
 
   if (!session) return <Navigate to="/login" replace />;
 
+  // Not recognised by any center yet — /pending offers the two real choices in context.
+  if (role === null) return <Navigate to="/pending" replace />;
+
   if (!isStaff) {
-    const parent = role === 'parent';
     return (
       <Notice
-        title={parent ? 'Use the Kinders mobile app' : 'Your account isn’t set up yet'}
-        message={
-          parent
-            ? 'The web dashboard is for center staff. Parents can view journals and message staff from the Kinders app on your phone.'
-            : 'This email isn’t recognised by any center yet. Ask your center director to add you as staff, then sign in again.'
-        }
+        title="Use the Kinders mobile app"
+        message="The web dashboard is for center staff. Parents can view journals and message staff from the Kinders app on your phone."
         onSignOut={signOut}
       />
     );

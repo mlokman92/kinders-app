@@ -2,21 +2,34 @@ import { useState } from 'react';
 import { Navigate } from 'react-router-dom';
 
 import { AppStoreBadge, GooglePlayBadge } from '@/components/StoreBadges';
-import { Button, Spinner, TextInput } from '@/components/ui';
+import { Button, Loading, Spinner, TextInput } from '@/components/ui';
 import logo from '@/assets/kinders_logo_transparent.png';
 import { useAuth } from '@/lib/auth';
 import { Brand, Radius } from '@/lib/theme';
 
 export function Login() {
-  const { session, initializing, isStaff, sendCode, verifyCode } = useAuth();
+  const { session, initializing, sendCode, verifyCode } = useAuth();
   const [step, setStep] = useState<'email' | 'code'>('email');
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Already signed in as staff -> straight to the dashboard.
-  if (!initializing && session && isStaff) return <Navigate to="/" replace />;
+  // Any signed-in user leaves /login; RequireStaff decides where they land (dashboard, /pending,
+  // or the parent notice). Gating this on `isStaff` stranded every non-staff user on the OTP form
+  // after a SUCCESSFUL verify — a valid session, an unchanged screen, and a misleading "token
+  // expired" on the next press. Routing lives in exactly one place now.
+  if (session) return <Navigate to="/" replace />;
+
+  // Session restore hasn't finished yet — hold, so an already-signed-in user never sees the email
+  // form flash before being redirected.
+  if (initializing) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
+        <Loading label="Signing you in…" />
+      </div>
+    );
+  }
 
   async function handleSendCode() {
     setError(null);
@@ -39,9 +52,12 @@ export function Login() {
     }
     setBusy(true);
     const { error } = await verifyCode(email, code);
-    setBusy(false);
-    // On success, AuthProvider updates the session/role and RequireStaff/redirect takes over.
-    if (error) setError(error);
+    // On success, AuthProvider updates the session and the redirect above takes over — stay busy
+    // so the form can't be submitted again with the now-consumed token while that lands.
+    if (error) {
+      setBusy(false);
+      setError(error);
+    }
   }
 
   return (

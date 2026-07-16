@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 
 import { Layout } from '@/components/Layout';
+import { RequirePending } from '@/components/RequirePending';
 import { RequireStaff } from '@/components/RequireStaff';
 import { BranchProvider } from '@/lib/branch';
 import { AccessKeys } from '@/pages/AccessKeys';
@@ -13,6 +14,7 @@ import { AssessmentDetail } from '@/pages/AssessmentDetail';
 import { Assessments } from '@/pages/Assessments';
 import { Attendance } from '@/pages/Attendance';
 import { Branches } from '@/pages/Branches';
+import { CenterSetup } from '@/pages/CenterSetup';
 import { Classrooms } from '@/pages/Classrooms';
 import { Levels } from '@/pages/Levels';
 import { StaffRoles } from '@/pages/StaffRoles';
@@ -22,6 +24,7 @@ import { Dashboard } from '@/pages/Dashboard';
 import { EnrollPublic } from '@/pages/EnrollPublic';
 import { Enrollments } from '@/pages/Enrollments';
 import { Login } from '@/pages/Login';
+import { Pending } from '@/pages/Pending';
 import { Plans } from '@/pages/Plans';
 import { Reports } from '@/pages/Reports';
 import { Settings } from '@/pages/Settings';
@@ -41,6 +44,13 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/enroll/:slug" element={<EnrollPublic />} />
+
+      {/* Signed in but not recognised by any center. Must sit OUTSIDE RequireStaff — that gate
+          rejects every non-staff role, which is exactly who these two pages are for. */}
+      <Route element={<RequirePending />}>
+        <Route path="/pending" element={<Pending />} />
+        <Route path="/setup" element={<CenterSetup />} />
+      </Route>
 
       <Route
         element={
